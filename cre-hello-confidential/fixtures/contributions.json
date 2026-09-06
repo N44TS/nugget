@@ -1,0 +1,17 @@
+{
+  "epoch": "2026-W36",
+  "contributions": [
+    { "claimId": "c01", "cycleLengthDays": 28, "periodLengthDays": 5, "symptoms": ["cramps", "mood"], "ageBand": "25-34" },
+    { "claimId": "c02", "cycleLengthDays": 30, "periodLengthDays": 4, "symptoms": ["cramps"], "ageBand": "25-34" },
+    { "claimId": "c03", "cycleLengthDays": 26, "periodLengthDays": 6, "symptoms": ["headache", "mood"], "ageBand": "18-24" },
+    { "claimId": "c04", "cycleLengthDays": 32, "periodLengthDays": 5, "symptoms": ["cramps", "fatigue"], "ageBand": "35-44" },
+    { "claimId": "c05", "cycleLengthDays": 27, "periodLengthDays": 4, "symptoms": ["mood"], "ageBand": "25-34" },
+    { "claimId": "c06", "cycleLengthDays": 29, "periodLengthDays": 5, "symptoms": ["cramps", "headache"], "ageBand": "18-24" },
+    { "claimId": "c07", "cycleLengthDays": 31, "periodLengthDays": 7, "symptoms": ["fatigue"], "ageBand": "35-44" },
+    { "claimId": "c08", "cycleLengthDays": 25, "periodLengthDays": 3, "symptoms": ["cramps", "mood", "fatigue"], "ageBand": "25-34" },
+    { "claimId": "c09", "cycleLengthDays": 28, "periodLengthDays": 5, "symptoms": ["cramps"], "ageBand": "45+" },
+    { "claimId": "c10", "cycleLengthDays": 33, "periodLengthDays": 6, "symptoms": ["mood", "headache"], "ageBand": "25-34" },
+    { "claimId": "c11", "cycleLengthDays": 200, "periodLengthDays": 5, "symptoms": ["cramps"], "ageBand": "25-34" },
+    { "claimId": "c12", "cycleLengthDays": 28, "periodLengthDays": 99, "symptoms": ["cramps"], "ageBand": "25-34" }
+  ]
+}

@@ -20892,18 +20892,168 @@ var sendErrorResponse = (error) => {
   }
   hostBindings.sendResponse(payload);
 };
+var CYCLE_MIN = 15;
+var CYCLE_MAX = 90;
+var PERIOD_MIN = 1;
+var PERIOD_MAX = 15;
+var isValidContribution = (c) => {
+  if (!c.claimId || typeof c.claimId !== "string")
+    return false;
+  if (!c.ageBand)
+    return false;
+  if (!Number.isFinite(c.cycleLengthDays) || c.cycleLengthDays < CYCLE_MIN || c.cycleLengthDays > CYCLE_MAX) {
+    return false;
+  }
+  if (!Number.isFinite(c.periodLengthDays) || c.periodLengthDays < PERIOD_MIN || c.periodLengthDays > PERIOD_MAX) {
+    return false;
+  }
+  if (!Array.isArray(c.symptoms))
+    return false;
+  return true;
+};
+var xorDecryptUtf8 = (cipherBytes, key) => {
+  if (!key)
+    throw new Error("decrypt key is empty");
+  const out = new Uint8Array(cipherBytes.length);
+  for (let i = 0;i < cipherBytes.length; i++) {
+    out[i] = cipherBytes[i] ^ key.charCodeAt(i % key.length);
+  }
+  return new TextDecoder().decode(out);
+};
+var parseContributionBatch = (raw) => {
+  if (!raw || typeof raw !== "object")
+    throw new Error("batch must be an object");
+  const obj = raw;
+  if (typeof obj.epoch !== "string" || !obj.epoch)
+    throw new Error("batch.epoch required");
+  if (!Array.isArray(obj.contributions))
+    throw new Error("batch.contributions must be an array");
+  return {
+    epoch: obj.epoch,
+    contributions: obj.contributions
+  };
+};
+var round1 = (n) => Math.round(n * 10) / 10;
+var aggregateContributions = (batch, kMin) => {
+  const valid = batch.contributions.filter(isValidContribution);
+  const rejectedCount = batch.contributions.length - valid.length;
+  const contributorCount = valid.length;
+  const kAnonOk = contributorCount >= kMin;
+  if (!kAnonOk) {
+    return {
+      epoch: batch.epoch,
+      contributorCount,
+      validCount: contributorCount,
+      rejectedCount,
+      kMin,
+      kAnonOk: false,
+      avgCycleLength: null,
+      avgPeriodLength: null,
+      symptomRates: null,
+      ageBandShare: null,
+      avgCycleByAgeBand: null
+    };
+  }
+  const avgCycleLength = round1(valid.reduce((sum, c) => sum + c.cycleLengthDays, 0) / contributorCount);
+  const avgPeriodLength = round1(valid.reduce((sum, c) => sum + c.periodLengthDays, 0) / contributorCount);
+  const symptomCounts = {};
+  for (const c of valid) {
+    const unique = new Set(c.symptoms.map((s) => s.toLowerCase()));
+    for (const s of unique) {
+      symptomCounts[s] = (symptomCounts[s] ?? 0) + 1;
+    }
+  }
+  const symptomRates = {};
+  for (const [symptom, count] of Object.entries(symptomCounts)) {
+    if (count >= kMin)
+      symptomRates[symptom] = round1(count / contributorCount);
+  }
+  const bandCounts = {};
+  const bandCycleSum = {};
+  for (const c of valid) {
+    bandCounts[c.ageBand] = (bandCounts[c.ageBand] ?? 0) + 1;
+    bandCycleSum[c.ageBand] = (bandCycleSum[c.ageBand] ?? 0) + c.cycleLengthDays;
+  }
+  const ageBandShare = {};
+  const avgCycleByAgeBand = {};
+  for (const [band, count] of Object.entries(bandCounts)) {
+    if (count >= kMin) {
+      ageBandShare[band] = round1(count / contributorCount);
+      avgCycleByAgeBand[band] = round1((bandCycleSum[band] ?? 0) / count);
+    }
+  }
+  return {
+    epoch: batch.epoch,
+    contributorCount,
+    validCount: contributorCount,
+    rejectedCount,
+    kMin,
+    kAnonOk: true,
+    avgCycleLength,
+    avgPeriodLength,
+    symptomRates,
+    ageBandShare: Object.keys(ageBandShare).length ? ageBandShare : null,
+    avgCycleByAgeBand: Object.keys(avgCycleByAgeBand).length ? avgCycleByAgeBand : null
+  };
+};
+var formatPublicSummary = (report) => {
+  if (!report.kAnonOk) {
+    return `SUPPRESSED batch=${report.epoch} n=${report.contributorCount} kMin=${report.kMin}`;
+  }
+  const symptoms = report.symptomRates ? Object.entries(report.symptomRates).map(([k, v]) => `${k}:${v}`).join(",") : "";
+  const ages = report.ageBandShare ? Object.entries(report.ageBandShare).map(([k, v]) => `${k}:${v}`).join(",") : "";
+  const avgByAge = report.avgCycleByAgeBand ? Object.entries(report.avgCycleByAgeBand).map(([k, v]) => `${k}:${v}`).join(",") : "";
+  return `OK batch=${report.epoch} n=${report.contributorCount} avgCycle=${report.avgCycleLength} avgPeriod=${report.avgPeriodLength} symptoms={${symptoms}} ageShare={${ages}} avgCycleByAge={${avgByAge}} rejected=${report.rejectedCount}`;
+};
 var configSchema = objectType({
   schedule: stringType(),
   url: stringType(),
   secretId: stringType(),
-  scoreThreshold: numberType()
+  kMin: numberType().int().positive()
 });
-var scoreResponse = (body) => {
-  let score = 0;
-  for (let i = 0;i < body.length; i++) {
-    score = (score + body.charCodeAt(i)) % 1000;
+var isEncryptedWrapper = (raw) => {
+  if (!raw || typeof raw !== "object")
+    return false;
+  const obj = raw;
+  return obj.encoding === "nugget1-xor-b64" && typeof obj.payload === "string";
+};
+var BASE64_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+var base64ToBytes2 = (b64) => {
+  const cleaned = b64.replace(/[\r\n\s]/g, "");
+  const pad = cleaned.endsWith("==") ? 2 : cleaned.endsWith("=") ? 1 : 0;
+  const len = cleaned.length;
+  const outLen = len * 3 / 4 | 0;
+  const out = new Uint8Array(outLen - pad);
+  let outIndex = 0;
+  for (let i = 0;i < len; i += 4) {
+    const c0 = BASE64_ALPHABET.indexOf(cleaned[i]);
+    const c1 = BASE64_ALPHABET.indexOf(cleaned[i + 1]);
+    const c2 = cleaned[i + 2] === "=" ? 0 : BASE64_ALPHABET.indexOf(cleaned[i + 2]);
+    const c3 = cleaned[i + 3] === "=" ? 0 : BASE64_ALPHABET.indexOf(cleaned[i + 3]);
+    if (c0 < 0 || c1 < 0 || c2 < 0 || c3 < 0)
+      throw new Error("invalid base64");
+    const triple = c0 << 18 | c1 << 12 | c2 << 6 | c3;
+    if (outIndex < out.length)
+      out[outIndex++] = triple >> 16 & 255;
+    if (outIndex < out.length)
+      out[outIndex++] = triple >> 8 & 255;
+    if (outIndex < out.length)
+      out[outIndex++] = triple & 255;
   }
-  return score;
+  return out;
+};
+var unlockContributionBatch = (body, secret) => {
+  let parsed;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    throw new Error("contribution payload is not valid JSON");
+  }
+  if (isEncryptedWrapper(parsed)) {
+    const plain = xorDecryptUtf8(base64ToBytes2(parsed.payload), secret);
+    return parseContributionBatch(JSON.parse(plain));
+  }
+  return parseContributionBatch(parsed);
 };
 var onCronTrigger = (runtime) => {
   const config = runtime.config;
@@ -20919,19 +21069,19 @@ var onCronTrigger = (runtime) => {
     throw new Error(`Confidential request failed with status: ${response.statusCode}`);
   }
   const body = text(response);
-  const secretReachedApi = body.includes(apiToken);
-  const score = scoreResponse(body);
-  const verdict = score >= config.scoreThreshold ? "APPROVE" : "REJECT";
-  runtime.log(`Enclave computation complete. verdict=${verdict}`);
+  const batch = unlockContributionBatch(body, apiToken);
+  const report = aggregateContributions(batch, config.kMin);
+  const summary = formatPublicSummary(report);
+  runtime.log(`Enclave aggregation complete. ${summary}`);
   const donRuntime = runtime.usingTheDons();
-  const encodedPayload = encodeAbiParameters(parseAbiParameters("string verdict, uint256 score"), [verdict, BigInt(score)]);
+  const encodedPayload = encodeAbiParameters(parseAbiParameters("string epoch, uint256 contributorCount, bool kAnonOk, string summary"), [report.epoch, BigInt(report.contributorCount), report.kAnonOk, summary]);
   donRuntime.report({
     encodedPayload: hexToBase64(encodedPayload),
     encoderName: "evm",
     signingAlgo: "ecdsa",
     hashingAlgo: "keccak256"
   }).result();
-  return `${verdict} (score: ${score}, secret reached API: ${secretReachedApi})`;
+  return summary;
 };
 function initWorkflow(config) {
   const cronTrigger = new cre.capabilities.CronCapability;
