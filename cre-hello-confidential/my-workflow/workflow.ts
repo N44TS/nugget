@@ -11,14 +11,15 @@ import {
 	aggregateContributions,
 	formatPublicSummary,
 	parseContributionBatch,
-	xorDecryptUtf8,
+	decryptForCre,
+	type CreEncryptedContribution,
 	type AggregateReport,
 } from './aggregate'
 
 // ─── Config Schema ──────────────────────────────────────────
 export const configSchema = z.object({
 	schedule: z.string(),
-	/** HTTP endpoint that returns a Nugget contribution batch (plaintext JSON or nugget1-xor-b64 wrapper). */
+	/** HTTP endpoint that returns ciphertext-only contribution envelopes. */
 	url: z.string(),
 	secretId: z.string(),
 	/** Minimum cohort size before aggregate cells are released. */
@@ -26,15 +27,20 @@ export const configSchema = z.object({
 })
 type Config = z.infer<typeof configSchema>
 
-type EncryptedWrapper = {
-	encoding: 'nugget1-xor-b64'
-	payload: string
+type EncryptedContributionBatch = {
+	encoding: 'nugget1-contribution-batch-v1'
+	epoch: string
+	contributions: CreEncryptedContribution[]
 }
 
-const isEncryptedWrapper = (raw: unknown): raw is EncryptedWrapper => {
+const isEncryptedBatch = (raw: unknown): raw is EncryptedContributionBatch => {
 	if (!raw || typeof raw !== 'object') return false
 	const obj = raw as Record<string, unknown>
-	return obj.encoding === 'nugget1-xor-b64' && typeof obj.payload === 'string'
+	return (
+		obj.encoding === 'nugget1-contribution-batch-v1' &&
+		typeof obj.epoch === 'string' &&
+		Array.isArray(obj.contributions)
+	)
 }
 
 const BASE64_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
@@ -65,7 +71,7 @@ const base64ToBytes = (b64: string): Uint8Array => {
  * - If the API returns a nugget1-xor-b64 wrapper, decrypt with the vault secret.
  * - If it returns plaintext JSON, parse directly (still only after Bearer auth).
  */
-export const unlockContributionBatch = (body: string, secret: string) => {
+export const unlockContributionBatch = (body: string, privateKeyBase64: string) => {
 	let parsed: unknown
 	try {
 		parsed = JSON.parse(body)
@@ -73,12 +79,27 @@ export const unlockContributionBatch = (body: string, secret: string) => {
 		throw new Error('contribution payload is not valid JSON')
 	}
 
-	if (isEncryptedWrapper(parsed)) {
-		const plain = xorDecryptUtf8(base64ToBytes(parsed.payload), secret)
-		return parseContributionBatch(JSON.parse(plain))
+	if (!isEncryptedBatch(parsed)) {
+		throw new Error('contribution payload must be an encrypted batch')
 	}
 
-	return parseContributionBatch(parsed)
+	const privateKey = base64ToBytes(privateKeyBase64)
+	if (privateKey.length !== 32) throw new Error('CRE private key must be 32 bytes')
+	const contributions = parsed.contributions.map((envelope) => {
+		if (
+			envelope.encoding !== 'nugget1-x25519-xchacha20poly1305-b64' ||
+			typeof envelope.ephemeralPublicKey !== 'string' ||
+			typeof envelope.nonce !== 'string' ||
+			typeof envelope.payload !== 'string'
+		) {
+			throw new Error('invalid encrypted contribution envelope')
+		}
+		return JSON.parse(
+			decryptForCre(envelope, privateKey, base64ToBytes),
+		)
+	})
+
+	return parseContributionBatch({ epoch: parsed.epoch, contributions })
 }
 
 // ─── TEE Cron Callback ──────────────────────────────────────
@@ -86,7 +107,8 @@ export const onCronTrigger = (runtime: TeeRuntime<Config>): string => {
 	const config = runtime.config
 
 	// Step 2: vault secret inside the enclave (auth + decrypt key)
-	const apiToken = runtime.getSecret({ id: config.secretId }).result().value
+	const encryptionPrivateKey = runtime.getSecret({ id: config.secretId }).result().value
+	const apiToken = ''
 
 	// Step 3: fetch contribution batch from inside the enclave
 	const response = new cre.capabilities.HTTPClient()
@@ -106,7 +128,7 @@ export const onCronTrigger = (runtime: TeeRuntime<Config>): string => {
 	const body = text(response)
 
 	// Confidential work: decrypt (if needed), validate, k-anon aggregate
-	const batch = unlockContributionBatch(body, apiToken)
+	const batch = unlockContributionBatch(body, encryptionPrivateKey)
 	const report: AggregateReport = aggregateContributions(batch, config.kMin)
 	const summary = formatPublicSummary(report)
 

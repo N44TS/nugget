@@ -1,3 +1,7 @@
+import { x25519 } from '@noble/curves/ed25519.js'
+import { xchacha20poly1305 } from '@noble/ciphers/chacha.js'
+import { sha256 } from '@noble/hashes/sha2.js'
+
 /**
  * Nugget — aggregation inside the CRE TEE handler.
  * Raw rows stay in the enclave; only AggregateReport fields leave.
@@ -16,6 +20,13 @@ export type Contribution = {
 export type ContributionBatch = {
 	epoch: string
 	contributions: Contribution[]
+}
+
+export type CreEncryptedContribution = {
+	encoding: 'nugget1-x25519-xchacha20poly1305-b64'
+	ephemeralPublicKey: string
+	nonce: string
+	payload: string
 }
 
 export type AggregateReport = {
@@ -54,22 +65,35 @@ export const isValidContribution = (c: Contribution): boolean => {
 	return true
 }
 
-export const xorDecryptUtf8 = (cipherBytes: Uint8Array, key: string): string => {
-	if (!key) throw new Error('decrypt key is empty')
-	const out = new Uint8Array(cipherBytes.length)
-	for (let i = 0; i < cipherBytes.length; i++) {
-		out[i] = cipherBytes[i]! ^ key.charCodeAt(i % key.length)
-	}
-	return new TextDecoder().decode(out)
-}
+const keyBytes = (key: string): Uint8Array => sha256(new TextEncoder().encode(key))
+const sharedKey = (sharedSecret: Uint8Array): Uint8Array => sha256(sharedSecret)
 
-export const xorEncryptUtf8 = (plain: string, key: string): Uint8Array => {
-	const bytes = new TextEncoder().encode(plain)
-	const out = new Uint8Array(bytes.length)
-	for (let i = 0; i < bytes.length; i++) {
-		out[i] = bytes[i]! ^ key.charCodeAt(i % key.length)
-	}
-	return out
+export const encryptAuthenticatedUtf8 = (
+	plain: string,
+	key: string,
+	nonce: Uint8Array,
+): Uint8Array => xchacha20poly1305(keyBytes(key), nonce).encrypt(new TextEncoder().encode(plain))
+
+export const decryptAuthenticatedUtf8 = (
+	cipherBytes: Uint8Array,
+	key: string,
+	nonce: Uint8Array,
+): string => new TextDecoder().decode(xchacha20poly1305(keyBytes(key), nonce).decrypt(cipherBytes))
+
+export const decryptForCre = (
+	envelope: CreEncryptedContribution,
+	recipientPrivateKey: Uint8Array,
+	base64ToBytes: (value: string) => Uint8Array,
+): string => {
+	const sharedSecret = x25519.getSharedSecret(
+		recipientPrivateKey,
+		base64ToBytes(envelope.ephemeralPublicKey),
+	)
+	return new TextDecoder().decode(
+		xchacha20poly1305(sharedKey(sharedSecret), base64ToBytes(envelope.nonce)).decrypt(
+			base64ToBytes(envelope.payload),
+		),
+	)
 }
 
 export const parseContributionBatch = (raw: unknown): ContributionBatch => {

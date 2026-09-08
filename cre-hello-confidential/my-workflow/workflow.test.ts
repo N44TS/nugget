@@ -1,17 +1,24 @@
 import { describe, expect } from 'bun:test'
 import type { TeeRuntime } from '@chainlink/cre-sdk'
 import { test } from '@chainlink/cre-sdk/test'
+import { x25519 } from '@noble/curves/ed25519.js'
+import { xchacha20poly1305 } from '@noble/ciphers/chacha.js'
+import { sha256 } from '@noble/hashes/sha2.js'
 import {
 	aggregateContributions,
+	decryptForCre,
+	decryptAuthenticatedUtf8,
+	encryptAuthenticatedUtf8,
 	isValidContribution,
 	parseContributionBatch,
-	xorDecryptUtf8,
-	xorEncryptUtf8,
 	type ContributionBatch,
 } from './aggregate'
 import { initWorkflow, onCronTrigger, unlockContributionBatch } from './workflow'
 
-const API_TOKEN = 'test-token'
+const RECIPIENT_PRIVATE_KEY = new Uint8Array(32).fill(7)
+const PRIVATE_KEY_B64 = Buffer.from(RECIPIENT_PRIVATE_KEY).toString('base64')
+const TEST_KEY = 'test-key'
+const API_TOKEN = ''
 
 const sampleBatch: ContributionBatch = {
 	epoch: '2026-W36',
@@ -29,7 +36,7 @@ const sampleBatch: ContributionBatch = {
 const makeConfig = () => ({
 	schedule: '0 */1 * * * *',
 	url: 'https://example.invalid/contributions',
-	secretId: 'API_TOKEN',
+	secretId: 'CRE_ENCRYPTION_PRIVATE_KEY',
 	kMin: 5,
 })
 
@@ -46,7 +53,7 @@ const makeFakeTeeRuntime = ({ statusCode = 200, body = '{}' }: FakeTeeRuntimeOpt
 	const runtime = {
 		config: makeConfig(),
 		getSecret: (request: { id?: string }) => ({
-			result: () => ({ id: request.id, value: API_TOKEN }),
+			result: () => ({ id: request.id, value: PRIVATE_KEY_B64 }),
 		}),
 		callCapability: ({ payload }: { payload: { multiHeaders?: Record<string, unknown> } }) => {
 			const auth = payload.multiHeaders?.Authorization as { values?: string[] } | undefined
@@ -73,6 +80,26 @@ const makeFakeTeeRuntime = ({ statusCode = 200, body = '{}' }: FakeTeeRuntimeOpt
 		reports,
 		logs,
 	}
+}
+
+const encryptedBatchBody = () => {
+	const recipientPublicKey = x25519.getPublicKey(RECIPIENT_PRIVATE_KEY)
+	const base64 = (bytes: Uint8Array) => Buffer.from(bytes).toString('base64')
+	const contributions = sampleBatch.contributions.map((contribution, index) => {
+		const ephemeralPrivateKey = new Uint8Array(32).fill(index + 9)
+		const sharedSecret = x25519.getSharedSecret(ephemeralPrivateKey, recipientPublicKey)
+		const nonce = new Uint8Array(24).fill(index + 3)
+		const payload = xchacha20poly1305(sha256(sharedSecret), nonce).encrypt(
+			new TextEncoder().encode(JSON.stringify(contribution)),
+		)
+		return {
+			encoding: 'nugget1-x25519-xchacha20poly1305-b64' as const,
+			ephemeralPublicKey: base64(x25519.getPublicKey(ephemeralPrivateKey)),
+			nonce: base64(nonce),
+			payload: base64(payload),
+		}
+	})
+	return JSON.stringify({ encoding: 'nugget1-contribution-batch-v1', epoch: sampleBatch.epoch, contributions })
 }
 
 describe('aggregate', () => {
@@ -110,20 +137,38 @@ describe('aggregate', () => {
 		expect(report.avgCycleByAgeBand?.['25-34']).toBeGreaterThan(20)
 	})
 
-	test('xor round-trip', () => {
+	test('authenticated encryption round-trip', () => {
 		const plain = JSON.stringify(sampleBatch)
-		const cipher = xorEncryptUtf8(plain, API_TOKEN)
-		expect(xorDecryptUtf8(cipher, API_TOKEN)).toBe(plain)
+		const nonce = new Uint8Array(24)
+		const cipher = encryptAuthenticatedUtf8(plain, TEST_KEY, nonce)
+		expect(decryptAuthenticatedUtf8(cipher, TEST_KEY, nonce)).toBe(plain)
 	})
 
-	test('unlockContributionBatch decrypts nugget1 wrapper', () => {
-		const plain = JSON.stringify(sampleBatch)
-		const cipher = xorEncryptUtf8(plain, API_TOKEN)
-		const payload = Buffer.from(cipher).toString('base64')
-		const wrapper = JSON.stringify({ encoding: 'nugget1-xor-b64', payload })
-		const batch = unlockContributionBatch(wrapper, API_TOKEN)
+	test('unlockContributionBatch decrypts every browser envelope', () => {
+		const batch = unlockContributionBatch(encryptedBatchBody(), PRIVATE_KEY_B64)
 		expect(batch.epoch).toBe('2026-W36')
 		expect(batch.contributions).toHaveLength(7)
+	})
+
+	test('CRE decrypts a browser-style X25519 envelope', () => {
+		const ephemeralPrivateKey = new Uint8Array(32).fill(9)
+		const recipientPublicKey = x25519.getPublicKey(RECIPIENT_PRIVATE_KEY)
+		const sharedSecret = x25519.getSharedSecret(ephemeralPrivateKey, recipientPublicKey)
+		const nonce = new Uint8Array(24).fill(3)
+		const payload = xchacha20poly1305(sha256(sharedSecret), nonce).encrypt(
+			new TextEncoder().encode('private contribution'),
+		)
+		const base64 = (bytes: Uint8Array) => Buffer.from(bytes).toString('base64')
+		const envelope = {
+			encoding: 'nugget1-x25519-xchacha20poly1305-b64' as const,
+			ephemeralPublicKey: base64(x25519.getPublicKey(ephemeralPrivateKey)),
+			nonce: base64(nonce),
+			payload: base64(payload),
+		}
+
+		expect(
+			decryptForCre(envelope, RECIPIENT_PRIVATE_KEY, (value) => new Uint8Array(Buffer.from(value, 'base64'))),
+		).toBe('private contribution')
 	})
 
 	test('parseContributionBatch requires epoch', () => {
@@ -133,35 +178,29 @@ describe('aggregate', () => {
 
 describe('onCronTrigger', () => {
 	test('injects the enclave-fetched secret into the outbound request', () => {
-		const body = JSON.stringify(sampleBatch)
+		const body = encryptedBatchBody()
 		const { runtime, capturedHeaders } = makeFakeTeeRuntime({ body })
 		onCronTrigger(runtime)
 		expect(capturedHeaders).toEqual([`Bearer ${API_TOKEN}`])
 	})
 
 	test('returns public aggregate summary', () => {
-		const { runtime, logs } = makeFakeTeeRuntime({ body: JSON.stringify(sampleBatch) })
+		const { runtime, logs } = makeFakeTeeRuntime({ body: encryptedBatchBody() })
 		const summary = onCronTrigger(runtime)
 		expect(summary).toContain('OK batch=2026-W36')
 		expect(summary).toContain('n=6')
-		expect(summary).not.toContain(API_TOKEN)
 		for (const line of logs) {
-			expect(line).not.toContain(API_TOKEN)
 			expect(line).not.toContain('"claimId":"c01"')
 		}
 	})
 
-	test('decrypts encrypted batch with vault secret', () => {
-		const plain = JSON.stringify(sampleBatch)
-		const cipher = xorEncryptUtf8(plain, API_TOKEN)
-		const payload = Buffer.from(cipher).toString('base64')
-		const body = JSON.stringify({ encoding: 'nugget1-xor-b64', payload })
-		const { runtime } = makeFakeTeeRuntime({ body })
+	test('decrypts the encrypted batch with the vault private key', () => {
+		const { runtime } = makeFakeTeeRuntime({ body: encryptedBatchBody() })
 		expect(onCronTrigger(runtime)).toContain('OK batch=2026-W36')
 	})
 
 	test('crosses back to the DON to generate a report', () => {
-		const { runtime, reports } = makeFakeTeeRuntime({ body: JSON.stringify(sampleBatch) })
+		const { runtime, reports } = makeFakeTeeRuntime({ body: encryptedBatchBody() })
 		onCronTrigger(runtime)
 		expect(reports).toHaveLength(1)
 	})

@@ -3,11 +3,10 @@ import { spawn } from "child_process"
 import { existsSync } from "fs"
 import { readFile, writeFile } from "fs/promises"
 import path from "path"
-import { aggregateContributions } from "@/lib/aggregate"
-import { loadPool, poolDataDir } from "@/lib/server-batch"
+import { loadEncryptedPool, poolDataDir } from "@/lib/server-batch"
 
 export const maxDuration = 120
-const K_MIN = 1
+const K_MIN = 2
 
 async function runCreSimulate(poolFetchUrl: string) {
   const creBin = process.env.CRE_BIN || path.join(process.env.HOME || "", ".cre/bin/cre")
@@ -69,7 +68,7 @@ async function runCreSimulate(poolFetchUrl: string) {
 }
 
 export async function POST(request: Request) {
-  const pool = await loadPool()
+  const pool = await loadEncryptedPool()
   if (!pool || pool.contributions.length === 0) {
     return NextResponse.json(
       {
@@ -100,29 +99,14 @@ export async function POST(request: Request) {
     )
   }
 
-  const report = aggregateContributions(pool, K_MIN)
-
   return NextResponse.json({
     ok: true,
     source: "cre-workflow-simulate",
     poolFetchUrl,
     dataDir: poolDataDir(),
     poolSize: pool.contributions.length,
-    claimIds: pool.contributions.map((c) => c.claimId),
     creSummary: cre.summary,
-    report: report.kAnonOk
-      ? {
-          batchId: report.epoch,
-          contributorCount: report.contributorCount,
-          avgCycleLength: report.avgCycleLength,
-          avgPeriodLength: report.avgPeriodLength,
-          symptomRates: report.symptomRates,
-          ageBandShare: report.ageBandShare,
-          avgCycleByAgeBand: report.avgCycleByAgeBand,
-          rejectedCount: report.rejectedCount,
-          kMin: report.kMin,
-        }
-      : null,
+    report: null,
     note: "Same CRE confidential path as cre-hello: fetch ciphertext → decrypt in handlerInTee → aggregate → public stats only.",
   })
 }

@@ -1,6 +1,6 @@
 {
   "schedule": "0 */1 * * * *",
   "url": "http://127.0.0.1:3000/api/contributions/encrypted",
-  "secretId": "API_TOKEN",
-  "kMin": 1
+  "secretId": "CRE_ENCRYPTION_PRIVATE_KEY",
+  "kMin": 2
 }

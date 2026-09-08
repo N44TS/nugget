@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState, useTransition } from "react"
 import Link from "next/link"
 import { entryToContribution, newClaimId } from "@/lib/cycle"
+import { base64ToBytes, encryptForCre } from "@/lib/crypto"
 import { loadEntries, loadReceipts, saveEntries, saveLocalReceipt, type LocalReceipt } from "@/lib/storage"
 import {
   AGE_BAND_OPTIONS,
@@ -99,10 +100,20 @@ export function TrackerApp() {
         return
       }
       try {
+        const keyRes = await fetch("/api/crypto/public-key", { cache: "no-store" })
+        const keyData = (await keyRes.json()) as { publicKey?: string; error?: string }
+        if (!keyRes.ok || !keyData.publicKey) {
+          setError(keyData.error ?? "CRE encryption key unavailable")
+          return
+        }
+        const encryptedContribution = encryptForCre(
+          JSON.stringify(contribution),
+          base64ToBytes(keyData.publicKey),
+        )
         const res = await fetch("/api/contribute", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ contribution }),
+          body: JSON.stringify({ contribution: encryptedContribution }),
         })
         const data = (await res.json()) as ContributeResponse
         if (!res.ok || !data.ok || !data.receipt || !data.pool) {

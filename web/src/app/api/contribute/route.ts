@@ -1,17 +1,13 @@
 import { NextResponse } from "next/server"
-import { aggregateContributions } from "@/lib/aggregate"
 import { isoWeekEpoch } from "@/lib/cycle"
 import {
-  addContribution,
-  loadPool,
+  addEncryptedContribution,
   poolDataDir,
   saveReceipt,
 } from "@/lib/server-batch"
-import type { AgeBand, Contribution } from "@/lib/types"
+import type { CreEncryptedContribution } from "@/lib/crypto"
 
-const K_MIN = 1
-const AGE_BANDS: AgeBand[] = ["18-24", "25-34", "35-44", "45+"]
-
+const K_MIN = 2
 export async function POST(request: Request) {
   let body: unknown
   try {
@@ -20,47 +16,40 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "invalid JSON" }, { status: 400 })
   }
 
-  const contribution = (body as { contribution?: Contribution }).contribution
-  if (!contribution?.claimId || !Array.isArray(contribution.symptoms)) {
-    return NextResponse.json({ error: "contribution required" }, { status: 400 })
-  }
-  if (!contribution.ageBand || !AGE_BANDS.includes(contribution.ageBand)) {
-    return NextResponse.json({ error: "ageBand required" }, { status: 400 })
-  }
+  const envelope = (body as { contribution?: CreEncryptedContribution }).contribution
   if (
-    !Number.isFinite(contribution.cycleLengthDays) ||
-    !Number.isFinite(contribution.periodLengthDays)
+    envelope?.encoding !== "nugget1-x25519-xchacha20poly1305-b64" ||
+    typeof envelope.ephemeralPublicKey !== "string" ||
+    typeof envelope.nonce !== "string" ||
+    typeof envelope.payload !== "string"
   ) {
-    return NextResponse.json({ error: "invalid contribution numbers" }, { status: 400 })
+    return NextResponse.json({ error: "encrypted contribution required" }, { status: 400 })
   }
 
   const batchId = isoWeekEpoch()
-  const pool = await addContribution(contribution, batchId)
+  const pool = await addEncryptedContribution(envelope, batchId)
+  const receiptId = crypto.randomUUID()
 
   await saveReceipt({
-    claimId: contribution.claimId,
+    claimId: receiptId,
     batchId,
     createdAt: new Date().toISOString(),
     inEncryptedPool: true,
   })
 
-  const publicPool = aggregateContributions(pool, K_MIN)
-  const verified = await loadPool()
-
   return NextResponse.json({
     ok: true,
     dataDir: poolDataDir(),
     receipt: {
-      claimId: contribution.claimId,
+      claimId: receiptId,
       batchId,
       inEncryptedPool: true,
     },
     pool: {
-      batchId: publicPool.epoch,
-      size: verified?.contributions.length ?? publicPool.contributorCount,
-      claimIds: (verified?.contributions ?? []).map((c) => c.claimId),
-      kMin: publicPool.kMin,
-      kAnonOk: publicPool.kAnonOk,
+      batchId: pool.epoch,
+      size: pool.contributions.length,
+      kMin: K_MIN,
+      kAnonOk: pool.contributions.length >= K_MIN,
       realContributionsOnly: true,
     },
     cre: {

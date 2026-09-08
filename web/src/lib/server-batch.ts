@@ -1,8 +1,8 @@
 import { mkdir, readFile, writeFile, rename, unlink } from "fs/promises"
 import fs from "fs"
 import path from "path"
-import { wrapEncryptedBatch } from "./crypto"
-import type { Contribution, ContributionBatch, EncryptedWrapper } from "./types"
+import type { CreEncryptedContribution } from "./crypto"
+import type { EncryptedContributionBatch } from "./types"
 
 /**
  * Resolve ONE shared pool directory no matter which port / cwd Next uses.
@@ -21,7 +21,7 @@ export function resolveDataDir(): string {
 
   // Prefer an existing dir that already has pool data, else prefer repo marker
   for (const dir of candidates) {
-    if (fs.existsSync(path.join(dir, "pool.json"))) return dir
+    if (fs.existsSync(path.join(dir, "encrypted-pool.json"))) return dir
   }
   for (const dir of candidates) {
     const parent = path.dirname(dir)
@@ -33,8 +33,32 @@ export function resolveDataDir(): string {
 }
 
 const dataDir = resolveDataDir()
-const poolPath = path.join(dataDir, "pool.json")
+const poolPath = path.join(dataDir, "encrypted-pool.json")
 const lockPath = path.join(dataDir, "pool.lock")
+
+const hostedStorageConfigured = Boolean(
+  process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY,
+)
+
+const supabaseRequest = async <T>(
+  table: string,
+  init: RequestInit = {},
+): Promise<T> => {
+  const response = await fetch(`${process.env.SUPABASE_URL}/rest/v1/${table}`, {
+    ...init,
+    headers: {
+      apikey: process.env.SUPABASE_SERVICE_ROLE_KEY!,
+      Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`,
+      "Content-Type": "application/json",
+      ...init.headers,
+    },
+  })
+  if (!response.ok) {
+    throw new Error(`Supabase ${table} request failed with status ${response.status}`)
+  }
+  if (response.status === 204) return undefined as T
+  return (await response.json()) as T
+}
 
 export type ContributionReceipt = {
   claimId: string
@@ -44,7 +68,7 @@ export type ContributionReceipt = {
 }
 
 export function poolDataDir(): string {
-  return dataDir
+  return hostedStorageConfigured ? "supabase:nugget_contributions" : dataDir
 }
 
 export function contributionSecret(): string {
@@ -83,18 +107,38 @@ async function withPoolLock<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
-export async function loadPool(): Promise<ContributionBatch | null> {
+export async function loadEncryptedPool(): Promise<EncryptedContributionBatch | null> {
+  if (hostedStorageConfigured) {
+    const latest = await supabaseRequest<Array<{ epoch: string }>>(
+      "nugget_contributions?select=epoch&order=created_at.desc&limit=1",
+    )
+    if (latest.length === 0) return null
+    const epoch = latest[0]!.epoch
+    const rows = await supabaseRequest<Array<{ envelope: CreEncryptedContribution; epoch: string }>>(
+      `nugget_contributions?select=epoch,envelope&epoch=eq.${encodeURIComponent(epoch)}&order=created_at.asc`,
+    )
+    if (rows.length === 0) return null
+    return {
+      encoding: "nugget1-contribution-batch-v1",
+      epoch,
+      contributions: rows.map((row) => row.envelope),
+    }
+  }
   try {
     const raw = await readFile(poolPath, "utf8")
-    const parsed = JSON.parse(raw) as ContributionBatch
-    if (!parsed?.epoch || !Array.isArray(parsed.contributions)) return null
+    const parsed = JSON.parse(raw) as EncryptedContributionBatch
+    if (
+      parsed?.encoding !== "nugget1-contribution-batch-v1" ||
+      !parsed.epoch ||
+      !Array.isArray(parsed.contributions)
+    ) return null
     return parsed
   } catch {
     return null
   }
 }
 
-async function writePoolAtomic(batch: ContributionBatch): Promise<void> {
+async function writePoolAtomic(batch: EncryptedContributionBatch): Promise<void> {
   await mkdir(dataDir, { recursive: true })
   const tmp = `${poolPath}.${process.pid}.tmp`
   await writeFile(tmp, JSON.stringify(batch, null, 2), "utf8")
@@ -102,16 +146,28 @@ async function writePoolAtomic(batch: ContributionBatch): Promise<void> {
 }
 
 /** Append (or replace same claimId) one real contribution. Never drops other rows. */
-export async function addContribution(
-  contribution: Contribution,
+export async function addEncryptedContribution(
+  contribution: CreEncryptedContribution,
   batchId: string,
-): Promise<ContributionBatch> {
+): Promise<EncryptedContributionBatch> {
+  if (hostedStorageConfigured) {
+    await supabaseRequest("nugget_contributions", {
+      method: "POST",
+      headers: { Prefer: "return=minimal" },
+      body: JSON.stringify({ epoch: batchId, envelope: contribution }),
+    })
+    return (await loadEncryptedPool())!
+  }
   return withPoolLock(async () => {
-    const prior = (await loadPool()) ?? { epoch: batchId, contributions: [] }
-    const others = prior.contributions.filter((c) => c.claimId !== contribution.claimId)
-    const next: ContributionBatch = {
+    const prior = (await loadEncryptedPool()) ?? {
+      encoding: "nugget1-contribution-batch-v1" as const,
       epoch: batchId,
-      contributions: [...others, contribution],
+      contributions: [],
+    }
+    const next: EncryptedContributionBatch = {
+      encoding: "nugget1-contribution-batch-v1",
+      epoch: batchId,
+      contributions: [...prior.contributions, contribution],
     }
     await writePoolAtomic(next)
     return next
@@ -119,6 +175,17 @@ export async function addContribution(
 }
 
 export async function clearPool(): Promise<void> {
+  if (hostedStorageConfigured) {
+    await supabaseRequest(
+      `nugget_contributions?epoch=not.is.null`,
+      { method: "DELETE", headers: { Prefer: "return=minimal" } },
+    )
+    await supabaseRequest(
+      `nugget_receipts?id=not.is.null`,
+      { method: "DELETE", headers: { Prefer: "return=minimal" } },
+    )
+    return
+  }
   await mkdir(dataDir, { recursive: true })
   await unlink(poolPath).catch(() => undefined)
   await unlink(path.join(dataDir, "receipts.json")).catch(() => undefined)
@@ -127,6 +194,11 @@ export async function clearPool(): Promise<void> {
 }
 
 export async function loadReceipts(): Promise<ContributionReceipt[]> {
+  if (hostedStorageConfigured) {
+    return supabaseRequest<ContributionReceipt[]>(
+      "nugget_receipts?select=claimId:claim_id,batchId:batch_id,createdAt:created_at,inEncryptedPool:in_encrypted_pool&order=created_at.desc",
+    )
+  }
   try {
     const raw = await readFile(path.join(dataDir, "receipts.json"), "utf8")
     const parsed = JSON.parse(raw) as ContributionReceipt[]
@@ -137,6 +209,19 @@ export async function loadReceipts(): Promise<ContributionReceipt[]> {
 }
 
 export async function saveReceipt(receipt: ContributionReceipt): Promise<void> {
+  if (hostedStorageConfigured) {
+    await supabaseRequest("nugget_receipts", {
+      method: "POST",
+      headers: { Prefer: "return=minimal" },
+      body: JSON.stringify({
+        claim_id: receipt.claimId,
+        batch_id: receipt.batchId,
+        created_at: receipt.createdAt,
+        in_encrypted_pool: receipt.inEncryptedPool,
+      }),
+    })
+    return
+  }
   await withPoolLock(async () => {
     const existing = await loadReceipts()
     const next = [receipt, ...existing.filter((r) => r.claimId !== receipt.claimId)]
@@ -144,18 +229,8 @@ export async function saveReceipt(receipt: ContributionReceipt): Promise<void> {
   })
 }
 
-/** Encrypt current pool for CRE HTTP fetch (built on the fly from pool.json). */
-export function encryptPoolForCre(batch: ContributionBatch): EncryptedWrapper {
-  return wrapEncryptedBatch(JSON.stringify(batch), contributionSecret())
-}
-
-export async function loadEncryptedBatch(): Promise<EncryptedWrapper | null> {
-  const pool = await loadPool()
+export async function loadEncryptedBatch(): Promise<EncryptedContributionBatch | null> {
+  const pool = await loadEncryptedPool()
   if (!pool || pool.contributions.length === 0) return null
-  return encryptPoolForCre(pool)
-}
-
-/** @deprecated use loadPool — kept name for older imports */
-export async function decryptStoredBatch(): Promise<ContributionBatch | null> {
-  return loadPool()
+  return pool
 }
