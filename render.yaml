@@ -1,0 +1,24 @@
+services:
+  - type: web
+    name: nugget
+    runtime: node
+    buildCommand: >-
+      curl -fsSL https://bun.sh/install | bash &&
+      curl -sSL https://app.chain.link/cre/install.sh | bash &&
+      export PATH="$HOME/.cre/bin:$HOME/.bun/bin:$PATH" &&
+      cd cre-hello-confidential/my-workflow &&
+      bun install --frozen-lockfile &&
+      cd ../../web &&
+      bun install --frozen-lockfile &&
+      bun run build
+    startCommand: $HOME/.bun/bin/bun --cwd web run start -- -H 0.0.0.0 -p $PORT
+    healthCheckPath: /
+    envVars:
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: CRE_PUBLIC_KEY
+        sync: false
+      - key: CRE_ENCRYPTION_PRIVATE_KEY
+        sync: false

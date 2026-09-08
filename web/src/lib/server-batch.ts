@@ -56,8 +56,11 @@ const supabaseRequest = async <T>(
   if (!response.ok) {
     throw new Error(`Supabase ${table} request failed with status ${response.status}`)
   }
-  if (response.status === 204) return undefined as T
-  return (await response.json()) as T
+  if (response.status === 204 || response.headers.get("content-length") === "0") {
+    return undefined as T
+  }
+  const text = await response.text()
+  return (text ? JSON.parse(text) : undefined) as T
 }
 
 export type ContributionReceipt = {

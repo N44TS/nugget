@@ -10,9 +10,18 @@ const K_MIN = 2
 
 async function runCreSimulate(poolFetchUrl: string) {
   const creBin = process.env.CRE_BIN || path.join(process.env.HOME || "", ".cre/bin/cre")
-  const projectRoot = path.resolve(process.cwd(), "../cre-hello-confidential")
+  const configuredRoot = process.env.CRE_PROJECT_ROOT
+  const projectRoot = configuredRoot
+    ? path.resolve(configuredRoot)
+    : path.resolve(process.cwd(), "../cre-hello-confidential")
   const altRoot = path.resolve(process.cwd(), "cre-hello-confidential")
   const root = existsSync(path.join(projectRoot, "my-workflow")) ? projectRoot : altRoot
+  if (!existsSync(path.join(root, "my-workflow"))) {
+    throw new Error("CRE project is not available in this deployment")
+  }
+  if (!process.env.CRE_ENCRYPTION_PRIVATE_KEY) {
+    throw new Error("CRE_ENCRYPTION_PRIVATE_KEY is not configured")
+  }
   const configPath = path.join(root, "my-workflow", "config.staging.json")
   const bunBin = path.join(process.env.HOME || "", ".bun/bin")
   const creDir = path.dirname(creBin)
@@ -80,8 +89,11 @@ export async function POST(request: Request) {
     )
   }
 
-  const host = request.headers.get("x-forwarded-host") || request.headers.get("host") || "127.0.0.1:3000"
-  const proto = request.headers.get("x-forwarded-proto") || "http"
+  const host = request.headers.get("x-forwarded-host") || request.headers.get("host")
+  const proto = request.headers.get("x-forwarded-proto") || "https"
+  if (!host) {
+    return NextResponse.json({ ok: false, error: "Public request host unavailable" }, { status: 500 })
+  }
   const poolFetchUrl = `${proto}://${host}/api/contributions/encrypted`
 
   const cre = await runCreSimulate(poolFetchUrl)
