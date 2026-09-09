@@ -1,5 +1,8 @@
-# Append --skip-type-checks after wasm/workflow.wasm to skip TypeScript typecheck (not recommended for production).
 .PHONY: build
 
 build:
-	bun cre-compile main.ts wasm/workflow.wasm
+	@if [ -f wasm/workflow.wasm ]; then \
+		echo "Using prebuilt wasm/workflow.wasm — skipping compile"; \
+	else \
+		bun cre-compile main.ts wasm/workflow.wasm; \
+	fi
