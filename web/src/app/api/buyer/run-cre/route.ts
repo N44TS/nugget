@@ -32,6 +32,12 @@ async function runCreSimulate(poolFetchUrl: string) {
   config.url = poolFetchUrl
   config.kMin = K_MIN
   await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf8")
+  console.log("[cre] prepared simulation", {
+    workflow: "my-workflow",
+    target: "staging-settings",
+    kMin: K_MIN,
+    endpoint: poolFetchUrl,
+  })
 
   try {
     return await new Promise<{ ok: boolean; summary: string | null; log: string; error?: string }>(
@@ -80,6 +86,10 @@ async function runCreSimulate(poolFetchUrl: string) {
           clearTimeout(timeout)
           console.log("[cre] process closed", { code })
           const match = out.match(/Workflow Simulation Result:\s*\n?"([^"]+)"/)
+          console.log("[cre] simulation result", {
+            exitCode: code,
+            hasSummary: Boolean(match?.[1]),
+          })
           resolve({
             ok: code === 0 && Boolean(match?.[1]),
             summary: match?.[1] ?? null,
@@ -122,6 +132,11 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: false, error: "Public request host unavailable" }, { status: 500 })
     }
     const poolFetchUrl = `${proto}://${host}/api/contributions/encrypted`
+    console.log("[cre] aggregation requested", {
+      poolSize: pool.contributions.length,
+      endpoint: poolFetchUrl,
+      storage: poolDataDir(),
+    })
 
     let cre: Awaited<ReturnType<typeof runCreSimulate>>
     try {
@@ -141,6 +156,10 @@ export async function POST(request: Request) {
       )
     }
     if (!cre.ok || !cre.summary) {
+      console.error("[cre] aggregation failed", {
+        error: cre.error || "CRE simulate failed",
+        poolSize: pool.contributions.length,
+      })
       return NextResponse.json(
         {
           ok: false,
@@ -154,6 +173,10 @@ export async function POST(request: Request) {
       )
     }
 
+    console.log("[cre] aggregation complete", {
+      poolSize: pool.contributions.length,
+      summary: cre.summary,
+    })
     return NextResponse.json({
       ok: true,
       source: "cre-workflow-simulate",

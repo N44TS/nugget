@@ -93,7 +93,14 @@ export function BuyerApp() {
         </p>
         <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap" }}>
           <button type="button" className="btn accent" disabled={pending} onClick={onRun}>
-            {pending && !resetting ? "Running CRE…" : "Run CRE aggregation"}
+            {pending && !resetting ? (
+              <>
+                <span className="spinner" aria-hidden="true" />
+                Running CRE…
+              </>
+            ) : (
+              "Run CRE aggregation"
+            )}
           </button>
           <button type="button" className="btn primary" disabled={pending || resetting} onClick={onReset}>
             {resetting ? "Clearing…" : "Clear pool"}
