@@ -108,7 +108,7 @@ export const onCronTrigger = (runtime: TeeRuntime<Config>): string => {
 
 	// Step 2: vault secret inside the enclave (auth + decrypt key)
 	const encryptionPrivateKey = runtime.getSecret({ id: config.secretId }).result().value
-	const apiToken = ''
+	const apiToken = ''//used login instead of waiting for api approval for now
 
 	// Step 3: fetch contribution batch from inside the enclave
 	const response = new cre.capabilities.HTTPClient()
