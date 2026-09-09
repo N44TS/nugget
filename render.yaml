@@ -4,7 +4,13 @@ services:
     runtime: node
     buildCommand: >-
       curl -fsSL https://bun.sh/install | bash &&
-      curl -sSL https://app.chain.link/cre/install.sh | bash &&
+      mkdir -p "$HOME/.cre/bin" &&
+      tmp="$(mktemp)" &&
+      curl -fsSL -o "$tmp" https://github.com/smartcontractkit/cre-cli/releases/download/v1.32.0/cre_linux_amd64_ldd2-35.tar.gz &&
+      tar -xzf "$tmp" -C "$HOME/.cre/bin" &&
+      mv "$HOME/.cre/bin/cre_v1.32.0_linux_amd64" "$HOME/.cre/bin/cre" &&
+      chmod +x "$HOME/.cre/bin/cre" &&
+      rm "$tmp" &&
       export PATH="$HOME/.cre/bin:$HOME/.bun/bin:$PATH" &&
       cd cre-hello-confidential/my-workflow &&
       bun install --frozen-lockfile &&

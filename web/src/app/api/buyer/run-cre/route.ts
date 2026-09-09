@@ -35,18 +35,20 @@ async function runCreSimulate(poolFetchUrl: string) {
   try {
     return await new Promise<{ ok: boolean; summary: string | null; log: string; error?: string }>(
       (resolve) => {
+        const args = [
+          "workflow",
+          "simulate",
+          "my-workflow",
+          "--target",
+          "staging-settings",
+          "--non-interactive",
+          "--trigger-index",
+          "0",
+        ]
+        console.log("[cre] spawning", { command: creBin, args, cwd: root, poolFetchUrl })
         const child = spawn(
           creBin,
-          [
-            "workflow",
-            "simulate",
-            "my-workflow",
-            "--target",
-            "staging-settings",
-            "--non-interactive",
-            "--trigger-index",
-            "0",
-          ],
+          args,
           {
             cwd: root,
             env: { ...process.env, PATH: `${creDir}:${bunBin}:${process.env.PATH || ""}` },
@@ -54,13 +56,28 @@ async function runCreSimulate(poolFetchUrl: string) {
         )
         let out = ""
         child.stdout.on("data", (d: Buffer) => {
-          out += d.toString()
+          const chunk = d.toString()
+          out += chunk
+          console.log("[cre stdout]", chunk.trimEnd())
         })
         child.stderr.on("data", (d: Buffer) => {
-          out += d.toString()
+          const chunk = d.toString()
+          out += chunk
+          console.error("[cre stderr]", chunk.trimEnd())
         })
-        child.on("error", (err) => resolve({ ok: false, summary: null, log: out, error: err.message }))
+        const timeout = setTimeout(() => {
+          console.error("[cre] simulation timed out")
+          child.kill("SIGTERM")
+          resolve({ ok: false, summary: null, log: out, error: "CRE simulation timed out" })
+        }, 110_000)
+        child.on("error", (err) => {
+          clearTimeout(timeout)
+          console.error("[cre] spawn error", err)
+          resolve({ ok: false, summary: null, log: out, error: err.message })
+        })
         child.on("close", (code) => {
+          clearTimeout(timeout)
+          console.log("[cre] process closed", { code })
           const match = out.match(/Workflow Simulation Result:\s*\n?"([^"]+)"/)
           resolve({
             ok: code === 0 && Boolean(match?.[1]),
@@ -96,7 +113,23 @@ export async function POST(request: Request) {
   }
   const poolFetchUrl = `${proto}://${host}/api/contributions/encrypted`
 
-  const cre = await runCreSimulate(poolFetchUrl)
+  let cre: Awaited<ReturnType<typeof runCreSimulate>>
+  try {
+    cre = await runCreSimulate(poolFetchUrl)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown CRE runner error"
+    console.error("[cre] runner setup error", error)
+    return NextResponse.json(
+      {
+        ok: false,
+        error: message,
+        poolFetchUrl,
+        dataDir: poolDataDir(),
+        poolSizeBeforeCre: pool.contributions.length,
+      },
+      { status: 500 },
+    )
+  }
   if (!cre.ok || !cre.summary) {
     return NextResponse.json(
       {
