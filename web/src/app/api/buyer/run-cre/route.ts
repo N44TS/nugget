@@ -7,6 +7,7 @@ import { loadEncryptedPool, poolDataDir } from "@/lib/server-batch"
 
 export const maxDuration = 120
 const K_MIN = 2
+let isRunning = false
 
 async function runCreSimulate(poolFetchUrl: string) {
   const creBin = process.env.CRE_BIN || path.join(process.env.HOME || "", ".cre/bin/cre")
@@ -94,64 +95,76 @@ async function runCreSimulate(poolFetchUrl: string) {
 }
 
 export async function POST(request: Request) {
-  const pool = await loadEncryptedPool()
-  if (!pool || pool.contributions.length === 0) {
+  if (isRunning) {
     return NextResponse.json(
-      {
-        ok: false,
-        error: "Pool empty. Opt in on :3000 and/or :3001 first.",
-        dataDir: poolDataDir(),
-      },
-      { status: 400 },
+      { ok: false, error: "Another aggregation is already running — please try again in a few seconds." },
+      { status: 429 },
     )
   }
+  isRunning = true
 
-  const host = request.headers.get("x-forwarded-host") || request.headers.get("host")
-  const proto = request.headers.get("x-forwarded-proto") || "https"
-  if (!host) {
-    return NextResponse.json({ ok: false, error: "Public request host unavailable" }, { status: 500 })
-  }
-  const poolFetchUrl = `${proto}://${host}/api/contributions/encrypted`
-
-  let cre: Awaited<ReturnType<typeof runCreSimulate>>
   try {
-    cre = await runCreSimulate(poolFetchUrl)
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown CRE runner error"
-    console.error("[cre] runner setup error", error)
-    return NextResponse.json(
-      {
-        ok: false,
-        error: message,
-        poolFetchUrl,
-        dataDir: poolDataDir(),
-        poolSizeBeforeCre: pool.contributions.length,
-      },
-      { status: 500 },
-    )
-  }
-  if (!cre.ok || !cre.summary) {
-    return NextResponse.json(
-      {
-        ok: false,
-        error: cre.error || "CRE simulate failed",
-        creLogTail: cre.log,
-        poolFetchUrl,
-        dataDir: poolDataDir(),
-        poolSizeBeforeCre: pool.contributions.length,
-      },
-      { status: 500 },
-    )
-  }
+    const pool = await loadEncryptedPool()
+    if (!pool || pool.contributions.length === 0) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "Pool empty. Opt in on :3000 and/or :3001 first.",
+          dataDir: poolDataDir(),
+        },
+        { status: 400 },
+      )
+    }
 
-  return NextResponse.json({
-    ok: true,
-    source: "cre-workflow-simulate",
-    poolFetchUrl,
-    dataDir: poolDataDir(),
-    poolSize: pool.contributions.length,
-    creSummary: cre.summary,
-    report: null,
-    note: "Same CRE confidential path as cre-hello: fetch ciphertext → decrypt in handlerInTee → aggregate → public stats only.",
-  })
+    const host = request.headers.get("x-forwarded-host") || request.headers.get("host")
+    const proto = request.headers.get("x-forwarded-proto") || "https"
+    if (!host) {
+      return NextResponse.json({ ok: false, error: "Public request host unavailable" }, { status: 500 })
+    }
+    const poolFetchUrl = `${proto}://${host}/api/contributions/encrypted`
+
+    let cre: Awaited<ReturnType<typeof runCreSimulate>>
+    try {
+      cre = await runCreSimulate(poolFetchUrl)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown CRE runner error"
+      console.error("[cre] runner setup error", error)
+      return NextResponse.json(
+        {
+          ok: false,
+          error: message,
+          poolFetchUrl,
+          dataDir: poolDataDir(),
+          poolSizeBeforeCre: pool.contributions.length,
+        },
+        { status: 500 },
+      )
+    }
+    if (!cre.ok || !cre.summary) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: cre.error || "CRE simulate failed",
+          creLogTail: cre.log,
+          poolFetchUrl,
+          dataDir: poolDataDir(),
+          poolSizeBeforeCre: pool.contributions.length,
+        },
+        { status: 500 },
+      )
+    }
+
+    return NextResponse.json({
+      ok: true,
+      source: "cre-workflow-simulate",
+      poolFetchUrl,
+      dataDir: poolDataDir(),
+      poolSize: pool.contributions.length,
+      creSummary: cre.summary,
+      report: null,
+      note: "Same CRE confidential path as cre-hello: fetch ciphertext → decrypt in handlerInTee → aggregate → public stats only.",
+    })
+  } finally {
+    isRunning = false
+  }
 }
