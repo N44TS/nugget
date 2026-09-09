@@ -1,7 +1,11 @@
 "use client"
 
 import Link from "next/link"
+import { usePrivy, useSendTransaction } from "@privy-io/react-auth"
 import { useState, useTransition } from "react"
+
+const paymentTreasury = process.env.NEXT_PUBLIC_BUYER_PAYMENT_TREASURY ?? ""
+const paymentWei = process.env.NEXT_PUBLIC_BUYER_PAYMENT_WEI ?? "1000000000000000"
 
 type RunCreResponse = {
   ok?: boolean
@@ -27,11 +31,55 @@ type RunCreResponse = {
 }
 
 export function BuyerApp() {
+  const { authenticated, user } = usePrivy()
+  const { sendTransaction } = useSendTransaction()
   const [pending, startTransition] = useTransition()
   const [resetting, setResetting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [status, setStatus] = useState<string | null>(null)
   const [result, setResult] = useState<RunCreResponse | null>(null)
+  const wallet = user?.linkedAccounts.find((account) => account.type === "wallet")
+
+  const onRun = () => {
+    setError(null)
+    setStatus(null)
+    setResult(null)
+    startTransition(async () => {
+      try {
+        if (!authenticated) {
+          setError("Sign in as the buyer organization before requesting a report")
+          return
+        }
+        if (!paymentTreasury) {
+          setError(
+            "Buyer payment treasury is not configured. Add NEXT_PUBLIC_BUYER_PAYMENT_TREASURY in Render and redeploy.",
+          )
+          return
+        }
+        setStatus("Approve the Sepolia report fee in your Privy wallet…")
+        const payment = await sendTransaction({
+          to: paymentTreasury,
+          value: paymentWei,
+          chainId: 11155111,
+        })
+        setStatus("Payment sent. Waiting for confirmation before running CRE…")
+        const res = await fetch("/api/buyer/run-cre", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ paymentTxHash: payment.hash }),
+        })
+        const data = (await res.json()) as RunCreResponse
+        if (!res.ok || !data.ok) {
+          setError(data.error ?? "CRE run failed")
+          if (data.creLogTail) setResult(data)
+          return
+        }
+        setResult(data)
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : "Payment or CRE request failed")
+      }
+    })
+  }
 
   const onReset = () => {
     setError(null)
@@ -54,26 +102,6 @@ export function BuyerApp() {
     })
   }
 
-  const onRun = () => {
-    setError(null)
-    setStatus(null)
-    setResult(null)
-    startTransition(async () => {
-      try {
-        const res = await fetch("/api/buyer/run-cre", { method: "POST" })
-        const data = (await res.json()) as RunCreResponse
-        if (!res.ok || !data.ok) {
-          setError(data.error ?? "CRE run failed")
-          if (data.creLogTail) setResult(data)
-          return
-        }
-        setResult(data)
-      } catch {
-        setError("Network error talking to buyer API")
-      }
-    })
-  }
-
   return (
     <div className="stack">
       <p className="lede">
@@ -91,6 +119,15 @@ export function BuyerApp() {
           <br />
           Do <strong>not</strong> run <code>bun run basic-flow</code> — that script invents test users.
         </p>
+        {authenticated && wallet && (
+          <p className="muted">
+            Fund this embedded wallet with Sepolia ETH before paying:
+            {" "}
+            <a href="https://sepoliafaucet.com/" target="_blank" rel="noreferrer">
+              Open Sepolia faucet
+            </a>
+          </p>
+        )}
         <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap" }}>
           <button type="button" className="btn accent" disabled={pending} onClick={onRun}>
             {pending && !resetting ? (
@@ -99,7 +136,7 @@ export function BuyerApp() {
                 Running CRE…
               </>
             ) : (
-              "Run CRE aggregation"
+              "Pay and run CRE report"
             )}
           </button>
           <button type="button" className="btn primary" disabled={pending || resetting} onClick={onReset}>

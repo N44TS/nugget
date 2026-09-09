@@ -8,6 +8,55 @@ import { loadEncryptedPool, poolDataDir } from "@/lib/server-batch"
 export const maxDuration = 120
 const K_MIN = 2
 let isRunning = false
+const SEPOLIA_CHAIN_ID = "0xaa36a7"
+
+async function verifyPayment(txHash: string) {
+  const treasury = process.env.BUYER_PAYMENT_TREASURY?.toLowerCase()
+  const rpcUrl = process.env.SEPOLIA_RPC_URL
+  const requiredWei = process.env.BUYER_PAYMENT_WEI
+  if (!treasury || !rpcUrl || !requiredWei) {
+    throw new Error("Buyer payment configuration is incomplete")
+  }
+  if (!/^0x[a-fA-F0-9]{64}$/.test(txHash)) {
+    throw new Error("Invalid payment transaction hash")
+  }
+
+  const rpc = async (method: string, params: unknown[]) => {
+    const response = await fetch(rpcUrl, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+      cache: "no-store",
+    })
+    if (!response.ok) throw new Error(`Sepolia RPC returned ${response.status}`)
+    const body = (await response.json()) as { result?: unknown; error?: { message?: string } }
+    if (body.error) throw new Error(body.error.message || "Sepolia RPC error")
+    return body.result
+  }
+
+  const transaction = (await rpc("eth_getTransactionByHash", [txHash])) as {
+    to?: string
+    value?: string
+    chainId?: string
+  } | null
+  if (!transaction) throw new Error("Payment transaction was not found yet")
+  if (transaction.chainId?.toLowerCase() !== SEPOLIA_CHAIN_ID) {
+    throw new Error("Payment must be made on Ethereum Sepolia")
+  }
+  if (transaction.to?.toLowerCase() !== treasury) {
+    throw new Error("Payment recipient does not match the configured treasury")
+  }
+  if (BigInt(transaction.value || "0x0") < BigInt(requiredWei)) {
+    throw new Error("Payment amount is below the required report fee")
+  }
+
+  const receipt = (await rpc("eth_getTransactionReceipt", [txHash])) as {
+    status?: string
+    blockNumber?: string
+  } | null
+  if (!receipt?.blockNumber) throw new Error("Payment is not confirmed yet")
+  if (receipt.status !== "0x1") throw new Error("Payment transaction failed")
+}
 
 async function runCreSimulate(poolFetchUrl: string) {
   const creBin = process.env.CRE_BIN || path.join(process.env.HOME || "", ".cre/bin/cre")
@@ -114,6 +163,17 @@ export async function POST(request: Request) {
   isRunning = true
 
   try {
+    const body = (await request.json().catch(() => ({}))) as { paymentTxHash?: string }
+    if (!body.paymentTxHash) {
+      return NextResponse.json({ ok: false, error: "A confirmed buyer payment is required" }, { status: 402 })
+    }
+    try {
+      await verifyPayment(body.paymentTxHash)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Payment verification failed"
+      return NextResponse.json({ ok: false, error: message }, { status: 402 })
+    }
+    console.log("[buyer] payment verified", { transaction: body.paymentTxHash })
     const pool = await loadEncryptedPool()
     if (!pool || pool.contributions.length === 0) {
       return NextResponse.json(
