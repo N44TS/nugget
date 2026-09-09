@@ -11,12 +11,32 @@ let isRunning = false
 const SEPOLIA_CHAIN_ID = "0xaa36a7"
 
 async function verifyPayment(txHash: string) {
-  const treasury = process.env.BUYER_PAYMENT_TREASURY?.toLowerCase()
-  const rpcUrl = process.env.SEPOLIA_RPC_URL
-  const requiredWei = process.env.BUYER_PAYMENT_WEI
+  const treasury = (
+    process.env.BUYER_PAYMENT_TREASURY ||
+    process.env.NEXT_PUBLIC_BUYER_PAYMENT_TREASURY
+  )?.toLowerCase()
+  const rpcUrl = process.env.SEPOLIA_RPC_URL || "https://ethereum-sepolia-rpc.publicnode.com"
+  const requiredWei =
+    process.env.BUYER_PAYMENT_WEI ||
+    process.env.NEXT_PUBLIC_BUYER_PAYMENT_WEI ||
+    "1000000000000000"
   if (!treasury || !rpcUrl || !requiredWei) {
+    console.error("[buyer] payment configuration incomplete", {
+      treasury: Boolean(treasury),
+      rpcUrl: Boolean(rpcUrl),
+      requiredWei: Boolean(requiredWei),
+      serverTreasury: Boolean(process.env.BUYER_PAYMENT_TREASURY),
+      publicTreasury: Boolean(process.env.NEXT_PUBLIC_BUYER_PAYMENT_TREASURY),
+      serverAmount: Boolean(process.env.BUYER_PAYMENT_WEI),
+      publicAmount: Boolean(process.env.NEXT_PUBLIC_BUYER_PAYMENT_WEI),
+    })
     throw new Error("Buyer payment configuration is incomplete")
   }
+  console.log("[buyer] payment configuration loaded", {
+    treasury,
+    rpcSource: process.env.SEPOLIA_RPC_URL ? "SEPOLIA_RPC_URL" : "publicnode-default",
+    requiredWei,
+  })
   if (!/^0x[a-fA-F0-9]{64}$/.test(txHash)) {
     throw new Error("Invalid payment transaction hash")
   }
@@ -171,6 +191,10 @@ export async function POST(request: Request) {
       await verifyPayment(body.paymentTxHash)
     } catch (error) {
       const message = error instanceof Error ? error.message : "Payment verification failed"
+      console.error("[buyer] payment verification failed", {
+        error: message,
+        transaction: body.paymentTxHash,
+      })
       return NextResponse.json({ ok: false, error: message }, { status: 402 })
     }
     console.log("[buyer] payment verified", { transaction: body.paymentTxHash })
