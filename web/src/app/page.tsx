@@ -1,5 +1,6 @@
 import { TrackerApp } from "@/components/TrackerApp"
 import { PrivyShell } from "@/components/PrivyShell"
+import Image from "next/image"
 
 export default function Home() {
   const privyAppId = process.env.NEXT_PUBLIC_PRIVY_APP_ID ?? ""
@@ -9,8 +10,16 @@ export default function Home() {
       <main className="shell contributor-shell">
         <header className="hero" aria-labelledby="page-title">
           <div className="hero-copy">
-            <span className="eyebrow">PRIVATE CYCLE TRACKING</span>
-            <h1 id="page-title" className="brand">Nugget</h1>
+            <h1 id="page-title" className="brand">Nugget
+                 <Image 
+      src="/nugget-logo.png" 
+      alt="Nugget logo" 
+      width={42} 
+      height={42} 
+      className="logo" 
+      priority 
+    />
+    </h1>
             <p className="tagline">A private place to track your cycle — with an optional way to contribute anonymous insights to research.</p>
           </div>
           <aside className="privacy-promise" aria-label="Privacy promise">

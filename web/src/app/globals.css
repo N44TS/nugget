@@ -46,6 +46,7 @@ a:hover { color: var(--forest); }
 .hero-copy { position: relative; z-index: 1; max-width: 530px; }
 .eyebrow, .step-label { color: var(--pink-dark); font-size: .73rem; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
 .brand { margin: .7rem 0 1rem; font-family: var(--font-display); font-size: clamp(3.8rem, 10vw, 6.5rem); font-weight: 900; letter-spacing: -.06em; line-height: 1.1; }
+.logo { display: inline-block; vertical-align: baseline; object-fit: contain; margin-left: 20px; }
 .tagline { max-width: 43ch; margin: 0; color: rgb(246 241 236 / .84); font-size: 1.12rem; font-weight: 500; line-height: 1.625; }
 .privacy-promise { position: relative; z-index: 1; display: flex; gap: .75rem; width: min(280px, 100%); padding: 1rem 1.1rem; border-radius: 1.5rem; color: var(--ink); background: var(--cream); box-shadow: 10px 10px 20px rgb(0 0 0 / .17), -4px -4px 10px rgb(255 255 255 / .1), inset 3px 3px 7px rgb(255 255 255 / .65), inset -3px -3px 7px rgb(23 53 45 / .07); }
 .privacy-promise > span { font-size: 1.35rem; }.privacy-promise strong,.privacy-promise div span { display: block; }.privacy-promise strong { margin-bottom: .18rem; font-size: .88rem; }.privacy-promise div span { color: var(--muted); font-size: .8rem; line-height: 1.35; }
