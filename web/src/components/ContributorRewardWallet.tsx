@@ -2,8 +2,10 @@
 
 import { useGuestAccounts } from "@privy-io/react-auth"
 import { useEffect, useState } from "react"
+import { loadReceipts } from "@/lib/storage"
 
 const WALLET_KEY = "nugget.rewardWallet.address.v1"
+const MIN_CONTRIBUTIONS = 2
 
 export function ContributorRewardWallet() {
   const { createGuestAccount } = useGuestAccounts()
@@ -11,9 +13,11 @@ export function ContributorRewardWallet() {
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [batchId, setBatchId] = useState<string | null>(null)
+  const [contributionCount, setContributionCount] = useState(0)
 
   useEffect(() => {
     setAddress(localStorage.getItem(WALLET_KEY))
+    setContributionCount(loadReceipts().length)
   }, [])
 
   const createWallet = async () => {
@@ -50,6 +54,8 @@ export function ContributorRewardWallet() {
     }
   }
 
+  const eligible = contributionCount >= MIN_CONTRIBUTIONS
+
   return (
     <section className="panel" aria-labelledby="contributor-reward-wallet-heading">
       <h2 id="contributor-reward-wallet-heading">Optional contributor rewards</h2>
@@ -62,10 +68,15 @@ export function ContributorRewardWallet() {
           Reward wallet ready: {address}
           {batchId && <> · eligible for batch {batchId}</>}
         </p>
-      ) : (
+      ) : eligible ? (
         <button type="button" className="btn primary" onClick={createWallet} disabled={creating}>
           {creating ? "Creating reward wallet…" : "Opt in to future rewards"}
         </button>
+      ) : (
+        <p className="muted">
+          Log and opt in {MIN_CONTRIBUTIONS - contributionCount} more cycle
+          {MIN_CONTRIBUTIONS - contributionCount === 1 ? "" : "s"} to unlock reward opt-in.
+        </p>
       )}
       {error && <p className="banner err" role="alert">{error}</p>}
     </section>

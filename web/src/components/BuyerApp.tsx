@@ -41,6 +41,11 @@ type RunCreResponse = {
     perWalletWei: string | null
     status: string
   } | null
+  payout?: {
+    status: string
+    payouts: Array<{ amountWei: string; transactionHash: string }>
+    error?: string
+  } | null
 }
 
 export function BuyerApp() {
@@ -183,6 +188,27 @@ export function BuyerApp() {
               ? `${result.rewardAccounting.perWalletWei} wei allocated per wallet.`
               : "held until the privacy thresholds are met."}
           </p>
+        </section>
+      )}
+      {result?.payout && (
+        <section className="panel">
+          <h2>Contributor payout settlement</h2>
+          <p className="muted">
+            {result.payout.status === "paid"
+              ? `${result.payout.payouts.length} payout(s) confirmed on Sepolia.`
+              : result.payout.error ?? "Payouts are held until the privacy thresholds and treasury setup are ready."}
+          </p>
+          {result.payout.payouts.map((payout) => (
+            <p className="muted" key={payout.transactionHash}>
+              <a
+                href={`https://sepolia.etherscan.io/tx/${payout.transactionHash}`}
+                target="_blank"
+                rel="noreferrer"
+              >
+                View payout transaction
+              </a>
+            </p>
+          ))}
         </section>
       )}
 

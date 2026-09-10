@@ -10,6 +10,7 @@ import {
   saveBuyerPayment,
   accountRewards,
 } from "@/lib/server-batch"
+import { payRewards } from "@/lib/treasury"
 
 export const maxDuration = 120
 const K_MIN = 2
@@ -307,6 +308,20 @@ export async function POST(request: Request) {
     const rewardAccounting = existingPayment
       ? await accountRewards(pool.epoch, pool.contributions.length, existingPayment.amountWei)
       : null
+    let payout: Awaited<ReturnType<typeof payRewards>> | null = null
+    if (rewardAccounting?.status === "payable") {
+      try {
+        payout = await payRewards(pool.epoch)
+      } catch (error) {
+        console.error("[rewards] settlement failed", { batchId: pool.epoch, error })
+        payout = {
+          status: "held",
+          batchId: pool.epoch,
+          payouts: [],
+          error: error instanceof Error ? error.message : "Reward settlement failed",
+        }
+      }
+    }
 
     console.log("[cre] aggregation complete", {
       poolSize: pool.contributions.length,
@@ -331,6 +346,14 @@ export async function POST(request: Request) {
         rewardPoolWei: rewardAccounting.rewardPoolWei,
         perWalletWei: rewardAccounting.perWalletWei,
         status: rewardAccounting.status,
+      },
+      payout: payout && {
+        status: payout.status,
+        payouts: payout.payouts.map(({ amountWei, transactionHash }) => ({
+          amountWei,
+          transactionHash,
+        })),
+        error: payout.error,
       },
       report: null,
       note: "Same CRE confidential path as cre-hello: fetch ciphertext → decrypt in handlerInTee → aggregate → public stats only.",

@@ -96,6 +96,15 @@ export type RewardAccounting = {
   perWalletWei: string | null
   status: "held" | "payable" | "paid"
   wallets: string[]
+  allocations?: RewardAllocation[]
+}
+
+export type RewardAllocation = {
+  batchId: string
+  walletAddress: string
+  amountWei: string
+  status: "allocated" | "paid"
+  transactionHash: string | null
 }
 
 export function poolDataDir(): string {
@@ -368,6 +377,50 @@ export async function loadEncryptedBatch(): Promise<EncryptedContributionBatch |
   return pool
 }
 
+export async function loadRewardAllocations(batchId: string): Promise<RewardAllocation[]> {
+  if (hostedStorageConfigured) {
+    return supabaseRequest<RewardAllocation[]>(
+      `nugget_reward_allocations?select=batchId:batch_id,walletAddress:wallet_address,amountWei:amount_wei,status,transactionHash:transaction_hash&batch_id=eq.${encodeURIComponent(batchId)}&order=wallet_address.asc`,
+    )
+  }
+  try {
+    return JSON.parse(
+      await readFile(path.join(dataDir, `reward-accounting-${batchId}.json`), "utf8"),
+    ).allocations as RewardAllocation[]
+  } catch {
+    return []
+  }
+}
+
+export async function markRewardAllocationPaid(
+  allocation: RewardAllocation,
+  transactionHash: string,
+): Promise<void> {
+  if (hostedStorageConfigured) {
+    await supabaseRequest(
+      `nugget_reward_allocations?batch_id=eq.${encodeURIComponent(allocation.batchId)}&wallet_address=eq.${encodeURIComponent(allocation.walletAddress)}`,
+      {
+        method: "PATCH",
+        headers: { Prefer: "return=minimal" },
+        body: JSON.stringify({ status: "paid", transaction_hash: transactionHash }),
+      },
+    )
+    return
+  }
+  const pathName = path.join(dataDir, `reward-accounting-${allocation.batchId}.json`)
+  await withPoolLock(async () => {
+    const accounting = JSON.parse(await readFile(pathName, "utf8")) as RewardAccounting & {
+      allocations?: RewardAllocation[]
+    }
+    accounting.allocations = (accounting.allocations ?? []).map((entry) =>
+      entry.walletAddress.toLowerCase() === allocation.walletAddress.toLowerCase()
+        ? { ...entry, status: "paid" as const, transactionHash }
+        : entry,
+    )
+    await writeFile(pathName, JSON.stringify(accounting, null, 2), "utf8")
+  })
+}
+
 export async function accountRewards(
   batchId: string,
   contributorCount: number,
@@ -377,6 +430,7 @@ export async function accountRewards(
   if (!Number.isSafeInteger(payoutKMin) || payoutKMin < 2) {
     throw new Error("PAYOUT_K_MIN must be an integer of at least 2")
   }
+
   let wallets: string[]
   if (hostedStorageConfigured) {
     const rows = await supabaseRequest<Array<{ wallet_address: string }>>(
@@ -406,6 +460,15 @@ export async function accountRewards(
     perWalletWei,
     status: payable ? "payable" : "held",
     wallets,
+    allocations: payable
+      ? wallets.map((walletAddress) => ({
+          batchId,
+          walletAddress,
+          amountWei: perWalletWei!,
+          status: "allocated" as const,
+          transactionHash: null,
+        }))
+      : [],
   }
   if (hostedStorageConfigured) {
     await supabaseRequest("nugget_reward_batches?on_conflict=batch_id", {
@@ -443,5 +506,19 @@ export async function accountRewards(
       )
     })
   }
+
   return accounting
+}
+
+export async function markRewardBatchPaid(batchId: string): Promise<void> {
+  if (hostedStorageConfigured) {
+    await supabaseRequest(
+      `nugget_reward_batches?batch_id=eq.${encodeURIComponent(batchId)}`,
+      {
+        method: "PATCH",
+        headers: { Prefer: "return=minimal" },
+        body: JSON.stringify({ status: "paid", updated_at: new Date().toISOString() }),
+      },
+    )
+  }
 }
