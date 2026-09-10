@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState, useTransition } from "react"
 import Link from "next/link"
+import { ContributorRewardWallet } from "@/components/ContributorRewardWallet"
 import { entryToContribution, newClaimId } from "@/lib/cycle"
 import { base64ToBytes, encryptForCre } from "@/lib/crypto"
 import { loadEntries, loadReceipts, saveEntries, saveLocalReceipt, type LocalReceipt } from "@/lib/storage"
@@ -31,7 +32,7 @@ type ContributeResponse = {
   cre?: { ran: boolean; reason: string }
 }
 
-export function TrackerApp() {
+export function TrackerApp({ showRewards = false }: { showRewards?: boolean }) {
   const [entries, setEntries] = useState<CycleEntry[]>([])
   const [receipts, setReceipts] = useState<LocalReceipt[]>([])
   const [ageBand, setAgeBand] = useState<AgeBand | "">("")
@@ -140,17 +141,13 @@ export function TrackerApp() {
   }
 
   return (
-    <div className="stack">
-      <p className="lede">
-        <Link href="/buyer">Buyer console →</Link> (aggregate real opt-ins)
-        <br />
-        Tip: run <code>:3000</code> and <code>:3001</code> as two users — they share one pool. Avoid{" "}
-        <code>basic-flow</code> (removed).
-      </p>
+    <div className="stack tracker-flow">
+      <p className="flow-tools">Testing research aggregates? <Link href="/buyer">Open the buyer console →</Link></p>
 
-      <section className="panel" aria-labelledby="profile-heading">
-        <h2 id="profile-heading">About you (non-identifying)</h2>
-        <p className="lede">Age band only — used in anonymous aggregates. Not your birthday or name.</p>
+      <section className="panel step-panel profile-panel" aria-labelledby="profile-heading">
+        <p className="step-label"><span>1</span> PROFILE</p>
+        <h2 id="profile-heading">Choose an age band</h2>
+        <p className="lede">This is not needed for private tracking. It is only used if you later choose to contribute an anonymous summary — never your name or birthday.</p>
         <div className="chips">
           {AGE_BAND_OPTIONS.map((opt) => (
             <button
@@ -166,9 +163,10 @@ export function TrackerApp() {
         </div>
       </section>
 
-      <section className="panel" aria-labelledby="log-heading">
+      <section className="panel step-panel log-panel" aria-labelledby="log-heading">
+        <p className="step-label"><span>2</span> PRIVATE LOG</p>
         <h2 id="log-heading">Log a period</h2>
-        <p className="lede">Encrypted on this device. Not uploaded until you opt in.</p>
+        <p className="lede">This is encrypted on this device. Saving it does <strong>not</strong> upload anything.</p>
 
         <div className="fields">
           <label>
@@ -202,16 +200,20 @@ export function TrackerApp() {
         </fieldset>
 
         <button type="button" className="btn primary" onClick={onSave}>
-          Save entry
+          Save private entry
         </button>
       </section>
 
-      <section className="panel" aria-labelledby="optin-heading">
-        <h2 id="optin-heading">Opt in to research pool</h2>
+      <section className="panel step-panel optin-panel" aria-labelledby="optin-heading">
+        <p className="step-label"><span>3</span> OPTIONAL CONTRIBUTION</p>
+        <h2 id="optin-heading">Contribute to research</h2>
         <p className="lede">
-          Uploads an anonymous summary (cycle length, period length, symptoms, age band) into the
-          encrypted pool. No money yet.
+          Your private diary never leaves this device. If you opt in, we send only an encrypted, anonymous summary of your cycle and symptoms to a shared research batch.
         </p>
+        <div className="batch-explainer">
+          <strong>What is a batch?</strong>
+          <span>It is a group of anonymous contributions collected together. Researchers can only request group-level statistics once the privacy threshold is met — never individual entries.</span>
+        </div>
         {receipts.length > 0 && (
           <ul className="history">
             {receipts.slice(0, 5).map((r) => (
@@ -230,12 +232,14 @@ export function TrackerApp() {
           disabled={pending || entries.length === 0 || !ageBand}
           onClick={onContribute}
         >
-          {pending ? "Opting in…" : "Opt in"}
+          {pending ? "Opting in…" : "Yes, share my anonymous summary"}
         </button>
+        {showRewards && <ContributorRewardWallet />}
       </section>
 
-      <section className="panel" aria-labelledby="history-heading">
-        <h2 id="history-heading">History</h2>
+      <section className="panel history-panel" aria-labelledby="history-heading">
+        <p className="step-label"> STORED ONLY ON THIS DEVICE</p>
+        <h2 id="history-heading">Your cycle history <span aria-hidden="true">💫</span></h2>
         {sorted.length === 0 ? (
           <p className="muted">No entries yet.</p>
         ) : (

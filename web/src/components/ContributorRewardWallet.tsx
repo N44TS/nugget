@@ -1,6 +1,6 @@
 "use client"
 
-import { useGuestAccounts } from "@privy-io/react-auth"
+import { usePrivy, useGuestAccounts } from "@privy-io/react-auth"
 import { useEffect, useState } from "react"
 import { loadReceipts } from "@/lib/storage"
 
@@ -8,6 +8,7 @@ const WALLET_KEY = "nugget.rewardWallet.address.v1"
 const MIN_CONTRIBUTIONS = 2
 
 export function ContributorRewardWallet() {
+  const { ready } = usePrivy()
   const { createGuestAccount } = useGuestAccounts()
   const [address, setAddress] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
@@ -57,11 +58,10 @@ export function ContributorRewardWallet() {
   const eligible = contributionCount >= MIN_CONTRIBUTIONS
 
   return (
-    <section className="panel" aria-labelledby="contributor-reward-wallet-heading">
-      <h2 id="contributor-reward-wallet-heading">Optional contributor rewards</h2>
+    <section className="reward-wallet" aria-labelledby="contributor-reward-wallet-heading">
+      <h3 id="contributor-reward-wallet-heading">Contributor rewards</h3>
       <p className="lede">
-        Create a separate Privy guest wallet if you want to receive future batch rewards.
-        It is not attached to your health contribution.
+        After two anonymous contributions, you can create a separate guest wallet for any future rewards from a qualifying batch. It is never attached to your health data.
       </p>
       {address ? (
         <p className="muted">
@@ -69,8 +69,13 @@ export function ContributorRewardWallet() {
           {batchId && <> · eligible for batch {batchId}</>}
         </p>
       ) : eligible ? (
-        <button type="button" className="btn primary" onClick={createWallet} disabled={creating}>
-          {creating ? "Creating reward wallet…" : "Opt in to future rewards"}
+        <button
+          type="button"
+          className="btn primary"
+          onClick={createWallet}
+          disabled={creating || !ready}
+        >
+          {!ready ? "Loading wallet system…" : creating ? "Creating reward wallet…" : "Opt in to future rewards"}
         </button>
       ) : (
         <p className="muted">
