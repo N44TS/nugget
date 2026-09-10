@@ -1,14 +1,16 @@
 import type { Metadata } from "next"
-import { Fraunces, Figtree } from "next/font/google"
+import { DM_Sans, Nunito } from "next/font/google"
 import "./globals.css"
 
-const display = Fraunces({
+const display = Nunito({
   subsets: ["latin"],
+  weight: ["700", "800", "900"],
   variable: "--font-display",
 })
 
-const sans = Figtree({
+const sans = DM_Sans({
   subsets: ["latin"],
+  weight: ["400", "500", "700"],
   variable: "--font-sans",
 })
 

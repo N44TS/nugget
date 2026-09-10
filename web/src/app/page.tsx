@@ -1,5 +1,4 @@
 import { TrackerApp } from "@/components/TrackerApp"
-import { ContributorRewardWallet } from "@/components/ContributorRewardWallet"
 import { PrivyShell } from "@/components/PrivyShell"
 
 export default function Home() {
@@ -7,11 +6,24 @@ export default function Home() {
 
   return (
     <PrivyShell appId={privyAppId}>
-      <main className="shell">
-        <h1 className="brand">Nugget</h1>
-        <p className="tagline">Your cycle data stays yours — track privately, opt in to research on your terms.</p>
-        <TrackerApp />
-        {privyAppId && <ContributorRewardWallet />}
+      <main className="shell contributor-shell">
+        <header className="hero" aria-labelledby="page-title">
+          <div className="hero-copy">
+            <span className="eyebrow">PRIVATE CYCLE TRACKING</span>
+            <h1 id="page-title" className="brand">Nugget</h1>
+            <p className="tagline">A private place to track your cycle — with an optional way to contribute anonymous insights to research.</p>
+          </div>
+          <aside className="privacy-promise" aria-label="Privacy promise">
+            <span aria-hidden="true">🔒</span>
+            <div><strong>Your entries stay on your device.</strong><span>You decide whether to share an anonymous summary.</span></div>
+          </aside>
+        </header>
+        <nav className="journey" aria-label="Your Nugget journey">
+          <span><b>1</b> Set your profile</span>
+          <span><b>2</b> Log privately</span>
+          <span><b>3</b> Contribute, if you want</span>
+        </nav>
+        <TrackerApp showRewards={Boolean(privyAppId)} />
         <p className="foot">
           No account or wallet is required to track or contribute. Health data enters an encrypted pool;
           the buyer runs Chainlink CRE to aggregate and publish public stats only.
