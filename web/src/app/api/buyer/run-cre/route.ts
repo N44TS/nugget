@@ -8,6 +8,7 @@ import {
   loadEncryptedPool,
   poolDataDir,
   saveBuyerPayment,
+  accountRewards,
 } from "@/lib/server-batch"
 
 export const maxDuration = 120
@@ -303,6 +304,9 @@ export async function POST(request: Request) {
         updatedAt: completedAt,
       })
     }
+    const rewardAccounting = existingPayment
+      ? await accountRewards(pool.epoch, pool.contributions.length, existingPayment.amountWei)
+      : null
 
     console.log("[cre] aggregation complete", {
       poolSize: pool.contributions.length,
@@ -319,6 +323,14 @@ export async function POST(request: Request) {
         txHash: body.paymentTxHash,
         status: "completed",
         explorerUrl: `https://sepolia.etherscan.io/tx/${body.paymentTxHash}`,
+      },
+      rewardAccounting: rewardAccounting && {
+        batchId: rewardAccounting.batchId,
+        contributorCount: rewardAccounting.contributorCount,
+        walletCount: rewardAccounting.walletCount,
+        rewardPoolWei: rewardAccounting.rewardPoolWei,
+        perWalletWei: rewardAccounting.perWalletWei,
+        status: rewardAccounting.status,
       },
       report: null,
       note: "Same CRE confidential path as cre-hello: fetch ciphertext → decrypt in handlerInTee → aggregate → public stats only.",

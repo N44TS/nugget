@@ -33,6 +33,14 @@ type RunCreResponse = {
     status: string
     explorerUrl: string
   }
+  rewardAccounting?: {
+    batchId: string
+    contributorCount: number
+    walletCount: number
+    rewardPoolWei: string
+    perWalletWei: string | null
+    status: string
+  } | null
 }
 
 export function BuyerApp() {
@@ -160,6 +168,20 @@ export function BuyerApp() {
             <a href={result.payment.explorerUrl} target="_blank" rel="noreferrer">
               View transaction on Etherscan
             </a>
+          </p>
+        </section>
+      )}
+      {result?.rewardAccounting && (
+        <section className="panel">
+          <h2>Contributor reward accounting</h2>
+          <p className="muted">
+            Batch {result.rewardAccounting.batchId}: {result.rewardAccounting.status}.
+            {" "}
+            {result.rewardAccounting.walletCount} eligible wallets,
+            {" "}
+            {result.rewardAccounting.perWalletWei
+              ? `${result.rewardAccounting.perWalletWei} wei allocated per wallet.`
+              : "held until the privacy thresholds are met."}
           </p>
         </section>
       )}

@@ -45,3 +45,27 @@ create index if not exists nugget_reward_opt_ins_batch_idx
   on public.nugget_reward_opt_ins (batch_id, opted_in_at);
 
 alter table public.nugget_reward_opt_ins enable row level security;
+
+create table if not exists public.nugget_reward_batches (
+  batch_id text primary key,
+  contributor_count integer not null,
+  wallet_count integer not null,
+  reward_pool_wei numeric not null,
+  per_wallet_wei numeric,
+  status text not null check (status in ('held', 'payable', 'paid')),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.nugget_reward_allocations (
+  batch_id text not null references public.nugget_reward_batches(batch_id),
+  wallet_address text not null,
+  amount_wei numeric not null,
+  status text not null check (status in ('allocated', 'paid')),
+  transaction_hash text,
+  created_at timestamptz not null default now(),
+  primary key (batch_id, wallet_address)
+);
+
+alter table public.nugget_reward_batches enable row level security;
+alter table public.nugget_reward_allocations enable row level security;

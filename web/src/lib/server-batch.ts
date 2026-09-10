@@ -88,6 +88,16 @@ export type RewardOptIn = {
   status: "eligible" | "paid" | "excluded"
 }
 
+export type RewardAccounting = {
+  batchId: string
+  contributorCount: number
+  walletCount: number
+  rewardPoolWei: string
+  perWalletWei: string | null
+  status: "held" | "payable" | "paid"
+  wallets: string[]
+}
+
 export function poolDataDir(): string {
   return hostedStorageConfigured ? "supabase:nugget_contributions" : dataDir
 }
@@ -215,6 +225,12 @@ export async function clearPool(): Promise<void> {
   await unlink(poolPath).catch(() => undefined)
   await unlink(path.join(dataDir, "receipts.json")).catch(() => undefined)
   await unlink(path.join(dataDir, "reward-opt-ins.json")).catch(() => undefined)
+  const accountingFiles = await fs.promises.readdir(dataDir).catch(() => [])
+  await Promise.all(
+    accountingFiles
+      .filter((name) => name.startsWith("reward-accounting-") && name.endsWith(".json"))
+      .map((name) => unlink(path.join(dataDir, name)).catch(() => undefined)),
+  )
   // legacy encrypted file from older builds
   await unlink(path.join(dataDir, "contributions.encrypted.json")).catch(() => undefined)
 }
@@ -321,6 +337,7 @@ export async function saveRewardOptIn(optIn: RewardOptIn): Promise<void> {
     })
     return
   }
+
   await withPoolLock(async () => {
     await mkdir(dataDir, { recursive: true })
     let optIns: RewardOptIn[] = []
@@ -329,6 +346,7 @@ export async function saveRewardOptIn(optIn: RewardOptIn): Promise<void> {
     } catch {
       optIns = []
     }
+
     const exists = optIns.some(
       (entry) =>
         entry.batchId === optIn.batchId &&
@@ -348,4 +366,82 @@ export async function loadEncryptedBatch(): Promise<EncryptedContributionBatch |
   const pool = await loadEncryptedPool()
   if (!pool || pool.contributions.length === 0) return null
   return pool
+}
+
+export async function accountRewards(
+  batchId: string,
+  contributorCount: number,
+  rewardPoolWei: string,
+): Promise<RewardAccounting> {
+  const payoutKMin = Number(process.env.PAYOUT_K_MIN || "2")
+  if (!Number.isSafeInteger(payoutKMin) || payoutKMin < 2) {
+    throw new Error("PAYOUT_K_MIN must be an integer of at least 2")
+  }
+  let wallets: string[]
+  if (hostedStorageConfigured) {
+    const rows = await supabaseRequest<Array<{ wallet_address: string }>>(
+      `nugget_reward_opt_ins?select=wallet_address&batch_id=eq.${encodeURIComponent(batchId)}&status=eq.eligible`,
+    )
+    wallets = [...new Set(rows.map((row) => row.wallet_address.toLowerCase()))]
+  } else {
+    try {
+      const raw = await readFile(path.join(dataDir, "reward-opt-ins.json"), "utf8")
+      const entries = JSON.parse(raw) as RewardOptIn[]
+      wallets = [...new Set(
+        entries
+          .filter((entry) => entry.batchId === batchId && entry.status === "eligible")
+          .map((entry) => entry.walletAddress.toLowerCase()),
+      )]
+    } catch {
+      wallets = []
+    }
+  }
+  const payable = contributorCount >= payoutKMin && wallets.length >= payoutKMin
+  const perWalletWei = payable ? (BigInt(rewardPoolWei) / BigInt(wallets.length)).toString() : null
+  const accounting: RewardAccounting = {
+    batchId,
+    contributorCount,
+    walletCount: wallets.length,
+    rewardPoolWei,
+    perWalletWei,
+    status: payable ? "payable" : "held",
+    wallets,
+  }
+  if (hostedStorageConfigured) {
+    await supabaseRequest("nugget_reward_batches?on_conflict=batch_id", {
+      method: "POST",
+      headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+      body: JSON.stringify({
+        batch_id: batchId,
+        contributor_count: contributorCount,
+        wallet_count: wallets.length,
+        reward_pool_wei: rewardPoolWei,
+        per_wallet_wei: perWalletWei,
+        status: accounting.status,
+        updated_at: new Date().toISOString(),
+      }),
+    })
+    if (payable) {
+      await supabaseRequest("nugget_reward_allocations", {
+        method: "POST",
+        headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+        body: JSON.stringify(wallets.map((walletAddress) => ({
+          batch_id: batchId,
+          wallet_address: walletAddress,
+          amount_wei: perWalletWei,
+          status: "allocated",
+        }))),
+      })
+    }
+  } else {
+    await withPoolLock(async () => {
+      await mkdir(dataDir, { recursive: true })
+      await writeFile(
+        path.join(dataDir, `reward-accounting-${batchId}.json`),
+        JSON.stringify(accounting, null, 2),
+        "utf8",
+      )
+    })
+  }
+  return accounting
 }
