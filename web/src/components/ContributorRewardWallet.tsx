@@ -2,32 +2,36 @@
 
 import { usePrivy, useGuestAccounts } from "@privy-io/react-auth"
 import { useEffect, useState } from "react"
-import { loadReceipts } from "@/lib/storage"
 
 const WALLET_KEY = "nugget.rewardWallet.address.v1"
+const WALLET_BATCH_KEY = "nugget.rewardWallet.batchId.v1"
 const MIN_CONTRIBUTIONS = 2
 
-export function ContributorRewardWallet() {
-  const { ready } = usePrivy()
+type ContributorRewardWalletProps = {
+  contributionCount: number
+  rewardBatchId: string | null
+}
+
+export function ContributorRewardWallet({ contributionCount, rewardBatchId }: ContributorRewardWalletProps) {
+  const { ready, authenticated, user } = usePrivy()
   const { createGuestAccount } = useGuestAccounts()
   const [address, setAddress] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [batchId, setBatchId] = useState<string | null>(null)
-  const [contributionCount, setContributionCount] = useState(0)
 
   useEffect(() => {
     setAddress(localStorage.getItem(WALLET_KEY))
-    setContributionCount(loadReceipts().length)
-  }, [])
+    setBatchId(localStorage.getItem(WALLET_BATCH_KEY) ?? rewardBatchId)
+  }, [rewardBatchId])
 
   const createWallet = async () => {
     setCreating(true)
     setError(null)
     try {
-      const user = await createGuestAccount()
-      const wallet = user.linkedAccounts.find((account) => account.type === "wallet")
-      if (!wallet) throw new Error("Privy did not return a reward wallet")
+      const guestUser = authenticated ? user : await createGuestAccount()
+      const wallet = guestUser?.linkedAccounts.find((account) => account.type === "wallet")
+      if (!wallet) throw new Error("No wallet is available for reward registration")
       const response = await fetch("/api/rewards/opt-in", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -48,6 +52,7 @@ export function ContributorRewardWallet() {
       setAddress(wallet.address)
       localStorage.setItem(WALLET_KEY, wallet.address)
       setBatchId(result.batchId)
+      localStorage.setItem(WALLET_BATCH_KEY, result.batchId)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Unable to create reward wallet")
     } finally {
@@ -61,12 +66,12 @@ export function ContributorRewardWallet() {
     <section className="reward-wallet" aria-labelledby="contributor-reward-wallet-heading">
       <h3 id="contributor-reward-wallet-heading">Contributor rewards</h3>
       <p className="lede">
-        After two anonymous contributions, you can create a separate guest wallet for any future rewards from a qualifying batch. It is never attached to your health data.
+        After two anonymous contributions, register a wallet for any future rewards from a qualifying batch. For the strongest privacy, use a separate guest wallet.
       </p>
       {address ? (
         <p className="muted">
           Reward wallet ready: {address}
-          {batchId && <> · eligible for batch {batchId}</>}
+          {batchId && <> · registered for batch {batchId}</>}
         </p>
       ) : eligible ? (
         <button
@@ -75,7 +80,7 @@ export function ContributorRewardWallet() {
           onClick={createWallet}
           disabled={creating || !ready}
         >
-          {!ready ? "Loading wallet system…" : creating ? "Creating reward wallet…" : "Opt in to future rewards"}
+          {!ready ? "Loading wallet system…" : creating ? "Registering reward wallet…" : authenticated ? "Register connected wallet" : "Create reward wallet"}
         </button>
       ) : (
         <p className="muted">

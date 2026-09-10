@@ -16,6 +16,17 @@ import {
 
 const today = () => new Date().toISOString().slice(0, 10)
 const AGE_KEY = "nugget.profile.ageBand.v1"
+const CONTRIBUTED_ENTRY_IDS_KEY = "nugget.contributions.entryIds.v1"
+const RESEARCH_OPT_IN_KEY = "nugget.research.optedIn.v1"
+
+const loadContributedEntryIds = (): string[] => {
+  try {
+    const saved = JSON.parse(localStorage.getItem(CONTRIBUTED_ENTRY_IDS_KEY) ?? "[]") as unknown
+    return Array.isArray(saved) && saved.every((id) => typeof id === "string") ? saved : []
+  } catch {
+    return []
+  }
+}
 
 type ContributeResponse = {
   ok?: boolean
@@ -40,8 +51,11 @@ export function TrackerApp({ showRewards = false }: { showRewards?: boolean }) {
   const [periodEnd, setPeriodEnd] = useState(today())
   const [symptoms, setSymptoms] = useState<Symptom[]>(["cramps"])
   const [status, setStatus] = useState<string | null>(null)
+  const [saveStatus, setSaveStatus] = useState<string | null>(null)
   const [poolSummary, setPoolSummary] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [contributedEntryIds, setContributedEntryIds] = useState<string[]>([])
+  const [researchOptedIn, setResearchOptedIn] = useState(false)
   const [pending, startTransition] = useTransition()
   const [ready, setReady] = useState(false)
 
@@ -50,12 +64,18 @@ export function TrackerApp({ showRewards = false }: { showRewards?: boolean }) {
     setReceipts(loadReceipts())
     const saved = localStorage.getItem(AGE_KEY) as AgeBand | null
     if (saved) setAgeBand(saved)
+    setContributedEntryIds(loadContributedEntryIds())
+    setResearchOptedIn(localStorage.getItem(RESEARCH_OPT_IN_KEY) === "true")
     setReady(true)
   }, [])
 
   const sorted = useMemo(
     () => [...entries].sort((a, b) => b.periodStart.localeCompare(a.periodStart)),
     [entries],
+  )
+  const latestEntryId = sorted[0]?.id
+  const latestEntryAlreadyContributed = Boolean(
+    latestEntryId && contributedEntryIds.includes(latestEntryId),
   )
 
   const toggleSymptom = (id: Symptom) => {
@@ -82,20 +102,37 @@ export function TrackerApp({ showRewards = false }: { showRewards?: boolean }) {
       createdAt: new Date().toISOString(),
     }
     persist([entry, ...entries])
-    setStatus("Saved on this device only (encrypted). Nothing uploaded.")
+    setSaveStatus(
+      researchOptedIn && ageBand
+        ? "Saved privately. Your research consent is active, so we are adding this anonymous summary to the current batch."
+        : "Saved privately on this device. Nothing has been uploaded.",
+    )
+    if (researchOptedIn && ageBand) onContribute([entry, ...entries], entry.id, false)
   }
 
-  const onContribute = () => {
+  const onContribute = (
+    entriesToContribute = entries,
+    entryId = latestEntryId,
+    enableOngoingConsent = true,
+  ) => {
     setError(null)
     setStatus(null)
     setPoolSummary(null)
+    if (entryId && contributedEntryIds.includes(entryId)) {
+      if (enableOngoingConsent) {
+        setResearchOptedIn(true)
+        localStorage.setItem(RESEARCH_OPT_IN_KEY, "true")
+        setStatus("Research consent is active. New cycles will contribute an anonymous summary automatically when you save them.")
+      }
+      return
+    }
     if (!ageBand) {
       setError("Select an age band before opting in. (Band only — not your date of birth.)")
       return
     }
     startTransition(async () => {
       localStorage.setItem(AGE_KEY, ageBand)
-      const contribution = entryToContribution(entries, newClaimId(), ageBand)
+      const contribution = entryToContribution(entriesToContribute, newClaimId(), ageBand)
       if (!contribution) {
         setError("Log at least one period before contributing.")
         return
@@ -123,9 +160,18 @@ export function TrackerApp({ showRewards = false }: { showRewards?: boolean }) {
         }
 
         setReceipts(saveLocalReceipt(data.receipt))
+        if (entryId) {
+          const nextContributedEntryIds = [...new Set([...contributedEntryIds, entryId])]
+          setContributedEntryIds(nextContributedEntryIds)
+          localStorage.setItem(CONTRIBUTED_ENTRY_IDS_KEY, JSON.stringify(nextContributedEntryIds))
+        }
+        if (enableOngoingConsent) {
+          setResearchOptedIn(true)
+          localStorage.setItem(RESEARCH_OPT_IN_KEY, "true")
+        }
         setStatus(
-          `Opt-in saved. Pool size now ${data.pool?.size ?? "?"} (shared folder). ` +
-            `claimId ${data.receipt.claimId.slice(0, 12)}… — then open Buyer → Run CRE.`,
+          `${enableOngoingConsent ? "Research consent is active." : "Anonymous summary added."} ` +
+            `Pool size now ${data.pool?.size ?? "?"}. New saved cycles will contribute automatically while consent remains active.`,
         )
         if (data.pool?.size) {
           setPoolSummary(`Shared pool has ${data.pool.size} real contribution(s). dataDir: ${data.dataDir ?? "?"}`)
@@ -134,6 +180,12 @@ export function TrackerApp({ showRewards = false }: { showRewards?: boolean }) {
         setError("Network error while contributing.")
       }
     })
+  }
+
+  const onOptOut = () => {
+    setResearchOptedIn(false)
+    localStorage.removeItem(RESEARCH_OPT_IN_KEY)
+    setStatus("Research consent is paused. Your existing anonymous contributions remain in their batches; future cycles will stay private.")
   }
 
   if (!ready) {
@@ -202,6 +254,7 @@ export function TrackerApp({ showRewards = false }: { showRewards?: boolean }) {
         <button type="button" className="btn primary" onClick={onSave}>
           Save private entry
         </button>
+        {saveStatus && <p className="inline-confirmation" role="status">{saveStatus}</p>}
       </section>
 
       <section className="panel step-panel optin-panel" aria-labelledby="optin-heading">
@@ -226,15 +279,32 @@ export function TrackerApp({ showRewards = false }: { showRewards?: boolean }) {
             ))}
           </ul>
         )}
-        <button
-          type="button"
-          className="btn accent"
-          disabled={pending || entries.length === 0 || !ageBand}
-          onClick={onContribute}
-        >
-          {pending ? "Opting in…" : "Yes, share my anonymous summary"}
-        </button>
-        {showRewards && <ContributorRewardWallet />}
+        {researchOptedIn ? (
+          <>
+            <p className="inline-confirmation" role="status">You are opted in. New saved cycles are contributed anonymously to the current batch.</p>
+            <button type="button" className="btn secondary" onClick={onOptOut}>Opt out of future contributions</button>
+          </>
+        ) : (
+          <>
+            <button
+              type="button"
+              className="btn accent"
+              disabled={pending || entries.length === 0 || !ageBand}
+              onClick={() => onContribute()}
+            >
+              {pending ? "Opting in…" : latestEntryAlreadyContributed ? "Continue contributing automatically" : "Opt in and share latest summary"}
+            </button>
+            {latestEntryAlreadyContributed && (
+              <p className="contribution-note" role="status">Your latest cycle is already in the pool. Turning this on means future saved cycles will contribute automatically.</p>
+            )}
+          </>
+        )}
+        {showRewards && (
+          <ContributorRewardWallet
+            contributionCount={receipts.length}
+            rewardBatchId={receipts[0]?.batchId ?? null}
+          />
+        )}
       </section>
 
       <section className="panel history-panel" aria-labelledby="history-heading">
