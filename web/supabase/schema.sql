@@ -31,3 +31,17 @@ create table if not exists public.nugget_buyer_payments (
 );
 
 alter table public.nugget_buyer_payments enable row level security;
+
+create table if not exists public.nugget_reward_opt_ins (
+  id uuid primary key default gen_random_uuid(),
+  batch_id text not null,
+  wallet_address text not null,
+  opted_in_at timestamptz not null default now(),
+  status text not null default 'eligible' check (status in ('eligible', 'paid', 'excluded')),
+  unique (batch_id, wallet_address)
+);
+
+create index if not exists nugget_reward_opt_ins_batch_idx
+  on public.nugget_reward_opt_ins (batch_id, opted_in_at);
+
+alter table public.nugget_reward_opt_ins enable row level security;

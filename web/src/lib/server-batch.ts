@@ -81,6 +81,13 @@ export type BuyerPaymentReceipt = {
   updatedAt: string
 }
 
+export type RewardOptIn = {
+  batchId: string
+  walletAddress: string
+  optedInAt: string
+  status: "eligible" | "paid" | "excluded"
+}
+
 export function poolDataDir(): string {
   return hostedStorageConfigured ? "supabase:nugget_contributions" : dataDir
 }
@@ -198,11 +205,16 @@ export async function clearPool(): Promise<void> {
       `nugget_receipts?id=not.is.null`,
       { method: "DELETE", headers: { Prefer: "return=minimal" } },
     )
+    await supabaseRequest(
+      `nugget_reward_opt_ins?id=not.is.null`,
+      { method: "DELETE", headers: { Prefer: "return=minimal" } },
+    )
     return
   }
   await mkdir(dataDir, { recursive: true })
   await unlink(poolPath).catch(() => undefined)
   await unlink(path.join(dataDir, "receipts.json")).catch(() => undefined)
+  await unlink(path.join(dataDir, "reward-opt-ins.json")).catch(() => undefined)
   // legacy encrypted file from older builds
   await unlink(path.join(dataDir, "contributions.encrypted.json")).catch(() => undefined)
 }
@@ -278,6 +290,7 @@ export async function saveBuyerPayment(payment: BuyerPaymentReceipt): Promise<vo
     })
     return
   }
+
   await withPoolLock(async () => {
     await mkdir(dataDir, { recursive: true })
     let payments: BuyerPaymentReceipt[] = []
@@ -291,6 +304,43 @@ export async function saveBuyerPayment(payment: BuyerPaymentReceipt): Promise<vo
       ...payments.filter((entry) => entry.txHash.toLowerCase() !== payment.txHash.toLowerCase()),
     ]
     await writeFile(path.join(dataDir, "buyer-payments.json"), JSON.stringify(next, null, 2), "utf8")
+  })
+}
+
+export async function saveRewardOptIn(optIn: RewardOptIn): Promise<void> {
+  if (hostedStorageConfigured) {
+    await supabaseRequest("nugget_reward_opt_ins?on_conflict=batch_id,wallet_address", {
+      method: "POST",
+      headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+      body: JSON.stringify({
+        batch_id: optIn.batchId,
+        wallet_address: optIn.walletAddress,
+        opted_in_at: optIn.optedInAt,
+        status: optIn.status,
+      }),
+    })
+    return
+  }
+  await withPoolLock(async () => {
+    await mkdir(dataDir, { recursive: true })
+    let optIns: RewardOptIn[] = []
+    try {
+      optIns = JSON.parse(await readFile(path.join(dataDir, "reward-opt-ins.json"), "utf8"))
+    } catch {
+      optIns = []
+    }
+    const exists = optIns.some(
+      (entry) =>
+        entry.batchId === optIn.batchId &&
+        entry.walletAddress.toLowerCase() === optIn.walletAddress.toLowerCase(),
+    )
+    if (!exists) {
+      await writeFile(
+        path.join(dataDir, "reward-opt-ins.json"),
+        JSON.stringify([optIn, ...optIns], null, 2),
+        "utf8",
+      )
+    }
   })
 }
 
