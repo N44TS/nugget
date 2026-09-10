@@ -3,7 +3,12 @@ import { spawn } from "child_process"
 import { existsSync } from "fs"
 import { readFile, writeFile } from "fs/promises"
 import path from "path"
-import { loadEncryptedPool, poolDataDir } from "@/lib/server-batch"
+import {
+  loadBuyerPayment,
+  loadEncryptedPool,
+  poolDataDir,
+  saveBuyerPayment,
+} from "@/lib/server-batch"
 
 export const maxDuration = 120
 const K_MIN = 2
@@ -55,6 +60,7 @@ async function verifyPayment(txHash: string) {
   }
 
   const transaction = (await rpc("eth_getTransactionByHash", [txHash])) as {
+    from?: string
     to?: string
     value?: string
     chainId?: string
@@ -76,6 +82,10 @@ async function verifyPayment(txHash: string) {
   } | null
   if (!receipt?.blockNumber) throw new Error("Payment is not confirmed yet")
   if (receipt.status !== "0x1") throw new Error("Payment transaction failed")
+  return {
+    buyerAddress: transaction.from || "unknown",
+    amountWei: BigInt(transaction.value || "0x0").toString(),
+  }
 }
 
 async function runCreSimulate(poolFetchUrl: string) {
@@ -188,7 +198,32 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: false, error: "A confirmed buyer payment is required" }, { status: 402 })
     }
     try {
-      await verifyPayment(body.paymentTxHash)
+      const existing = await loadBuyerPayment(body.paymentTxHash)
+      if (existing?.status === "completed" && existing.reportSummary) {
+        return NextResponse.json({
+          ok: true,
+          source: "stored-buyer-report",
+          creSummary: existing.reportSummary,
+          payment: {
+            txHash: existing.txHash,
+            status: existing.status,
+            explorerUrl: `https://sepolia.etherscan.io/tx/${existing.txHash}`,
+          },
+          note: "This payment already unlocked this report; the stored result was returned.",
+        })
+      }
+      const verified = await verifyPayment(body.paymentTxHash)
+      const now = new Date().toISOString()
+      await saveBuyerPayment({
+        txHash: body.paymentTxHash,
+        buyerAddress: verified.buyerAddress,
+        amountWei: verified.amountWei,
+        batchId: null,
+        status: "verified",
+        reportSummary: null,
+        createdAt: now,
+        updatedAt: now,
+      })
     } catch (error) {
       const message = error instanceof Error ? error.message : "Payment verification failed"
       console.error("[buyer] payment verification failed", {
@@ -257,6 +292,18 @@ export async function POST(request: Request) {
       )
     }
 
+    const completedAt = new Date().toISOString()
+    const existingPayment = await loadBuyerPayment(body.paymentTxHash)
+    if (existingPayment) {
+      await saveBuyerPayment({
+        ...existingPayment,
+        batchId: pool.epoch,
+        status: "completed",
+        reportSummary: cre.summary,
+        updatedAt: completedAt,
+      })
+    }
+
     console.log("[cre] aggregation complete", {
       poolSize: pool.contributions.length,
       summary: cre.summary,
@@ -268,6 +315,11 @@ export async function POST(request: Request) {
       dataDir: poolDataDir(),
       poolSize: pool.contributions.length,
       creSummary: cre.summary,
+      payment: {
+        txHash: body.paymentTxHash,
+        status: "completed",
+        explorerUrl: `https://sepolia.etherscan.io/tx/${body.paymentTxHash}`,
+      },
       report: null,
       note: "Same CRE confidential path as cre-hello: fetch ciphertext → decrypt in handlerInTee → aggregate → public stats only.",
     })

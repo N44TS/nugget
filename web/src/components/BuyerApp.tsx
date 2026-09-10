@@ -28,6 +28,11 @@ type RunCreResponse = {
   } | null
   poolSize?: number
   claimIds?: string[]
+  payment?: {
+    txHash: string
+    status: string
+    explorerUrl: string
+  }
 }
 
 export function BuyerApp() {
@@ -147,6 +152,17 @@ export function BuyerApp() {
 
       {status && <p className="banner ok" role="status">{status}</p>}
       {error && <p className="banner err" role="alert">{error}</p>}
+      {result?.payment && (
+        <section className="panel">
+          <h2>Payment confirmed</h2>
+          <p className="muted">
+            Report access: {result.payment.status}.{" "}
+            <a href={result.payment.explorerUrl} target="_blank" rel="noreferrer">
+              View transaction on Etherscan
+            </a>
+          </p>
+        </section>
+      )}
 
       {result?.creSummary && (
         <section className="panel">

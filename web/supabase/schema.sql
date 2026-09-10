@@ -18,3 +18,16 @@ create table if not exists public.nugget_receipts (
 
 alter table public.nugget_contributions enable row level security;
 alter table public.nugget_receipts enable row level security;
+
+create table if not exists public.nugget_buyer_payments (
+  tx_hash text primary key,
+  buyer_address text not null,
+  amount_wei numeric not null,
+  batch_id text,
+  status text not null check (status in ('verified', 'completed', 'failed')),
+  report_summary text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+alter table public.nugget_buyer_payments enable row level security;

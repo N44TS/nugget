@@ -70,6 +70,17 @@ export type ContributionReceipt = {
   inEncryptedPool: boolean
 }
 
+export type BuyerPaymentReceipt = {
+  txHash: string
+  buyerAddress: string
+  amountWei: string
+  batchId: string | null
+  status: "verified" | "completed" | "failed"
+  reportSummary: string | null
+  createdAt: string
+  updatedAt: string
+}
+
 export function poolDataDir(): string {
   return hostedStorageConfigured ? "supabase:nugget_contributions" : dataDir
 }
@@ -225,10 +236,61 @@ export async function saveReceipt(receipt: ContributionReceipt): Promise<void> {
     })
     return
   }
+
   await withPoolLock(async () => {
     const existing = await loadReceipts()
     const next = [receipt, ...existing.filter((r) => r.claimId !== receipt.claimId)]
     await writeFile(path.join(dataDir, "receipts.json"), JSON.stringify(next, null, 2), "utf8")
+  })
+}
+
+export async function loadBuyerPayment(txHash: string): Promise<BuyerPaymentReceipt | null> {
+  if (hostedStorageConfigured) {
+    const rows = await supabaseRequest<BuyerPaymentReceipt[]>(
+      `nugget_buyer_payments?select=txHash:tx_hash,buyerAddress:buyer_address,amountWei:amount_wei,batchId:batch_id,status,reportSummary:report_summary,createdAt:created_at,updatedAt:updated_at&tx_hash=eq.${encodeURIComponent(txHash)}&limit=1`,
+    )
+    return rows[0] ?? null
+  }
+  try {
+    const raw = await readFile(path.join(dataDir, "buyer-payments.json"), "utf8")
+    const payments = JSON.parse(raw) as BuyerPaymentReceipt[]
+    return payments.find((payment) => payment.txHash.toLowerCase() === txHash.toLowerCase()) ?? null
+  } catch {
+    return null
+  }
+}
+
+export async function saveBuyerPayment(payment: BuyerPaymentReceipt): Promise<void> {
+  if (hostedStorageConfigured) {
+    await supabaseRequest("nugget_buyer_payments", {
+      method: "POST",
+      headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+      body: JSON.stringify({
+        tx_hash: payment.txHash,
+        buyer_address: payment.buyerAddress,
+        amount_wei: payment.amountWei,
+        batch_id: payment.batchId,
+        status: payment.status,
+        report_summary: payment.reportSummary,
+        created_at: payment.createdAt,
+        updated_at: payment.updatedAt,
+      }),
+    })
+    return
+  }
+  await withPoolLock(async () => {
+    await mkdir(dataDir, { recursive: true })
+    let payments: BuyerPaymentReceipt[] = []
+    try {
+      payments = JSON.parse(await readFile(path.join(dataDir, "buyer-payments.json"), "utf8"))
+    } catch {
+      payments = []
+    }
+    const next = [
+      payment,
+      ...payments.filter((entry) => entry.txHash.toLowerCase() !== payment.txHash.toLowerCase()),
+    ]
+    await writeFile(path.join(dataDir, "buyer-payments.json"), JSON.stringify(next, null, 2), "utf8")
   })
 }
 
