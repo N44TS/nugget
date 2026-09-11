@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { isoWeekEpoch } from "@/lib/cycle"
+import { payoutWindowId } from "@/lib/cycle"
 import {
   addEncryptedContribution,
   poolDataDir,
@@ -16,7 +16,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "invalid JSON" }, { status: 400 })
   }
 
-  const envelope = (body as { contribution?: CreEncryptedContribution }).contribution
+  const contributionBody = body as { contribution?: CreEncryptedContribution; claimId?: string }
+  const envelope = contributionBody.contribution
   if (
     envelope?.encoding !== "nugget1-x25519-xchacha20poly1305-b64" ||
     typeof envelope.ephemeralPublicKey !== "string" ||
@@ -26,9 +27,12 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "encrypted contribution required" }, { status: 400 })
   }
 
-  const batchId = isoWeekEpoch()
+  const batchId = payoutWindowId()
   const pool = await addEncryptedContribution(envelope, batchId)
-  const receiptId = crypto.randomUUID()
+  const receiptId = contributionBody.claimId
+  if (!receiptId || !/^n[a-f0-9]{16}$/i.test(receiptId)) {
+    return NextResponse.json({ error: "valid client claim ID required" }, { status: 400 })
+  }
 
   await saveReceipt({
     claimId: receiptId,

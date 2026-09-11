@@ -3,8 +3,12 @@
 import Link from "next/link"
 import { usePrivy, useSendTransaction } from "@privy-io/react-auth"
 import { useState, useTransition } from "react"
+import { encodeFunctionData } from "viem"
+import { payoutWindowId } from "@/lib/cycle"
+import { batchCommitment, nuggetBatchEscrowAbi } from "@/lib/escrow"
 
 const paymentTreasury = process.env.NEXT_PUBLIC_BUYER_PAYMENT_TREASURY ?? ""
+const escrowAddress = process.env.NEXT_PUBLIC_NUGGET_BATCH_ESCROW_ADDRESS ?? ""
 const paymentWei = process.env.NEXT_PUBLIC_BUYER_PAYMENT_WEI ?? "1000000000000000"
 
 type RunCreResponse = {
@@ -46,6 +50,10 @@ type RunCreResponse = {
     payouts: Array<{ amountWei: string; transactionHash: string }>
     error?: string
   } | null
+  escrowSettlement?: {
+    txHash: string
+    explorerUrl: string
+  } | null
 }
 
 export function BuyerApp() {
@@ -68,17 +76,37 @@ export function BuyerApp() {
           setError("Sign in as the buyer organization before requesting a report")
           return
         }
-        if (!paymentTreasury) {
+        const usesEscrow = /^0x[a-fA-F0-9]{40}$/.test(escrowAddress)
+        if (!usesEscrow && !paymentTreasury) {
           setError(
-            "Buyer payment treasury is not configured. Add NEXT_PUBLIC_BUYER_PAYMENT_TREASURY in Render and redeploy.",
+            "Buyer payment destination is not configured. Add NEXT_PUBLIC_NUGGET_BATCH_ESCROW_ADDRESS (recommended) or NEXT_PUBLIC_BUYER_PAYMENT_TREASURY in Render and redeploy.",
           )
           return
         }
-        setStatus("Approve the Sepolia report fee in your Privy wallet…")
+        let batchId = payoutWindowId()
+        if (usesEscrow) {
+          const poolResponse = await fetch("/api/pool/verify", { cache: "no-store" })
+          const poolData = (await poolResponse.json()) as { pool?: { batchId?: string }; error?: string }
+          if (!poolResponse.ok || !poolData.pool?.batchId) {
+            setError(poolData.error ?? "The contribution pool is empty. Wait for contributors before funding a batch.")
+            return
+          }
+          batchId = poolData.pool.batchId
+        }
+        setStatus(usesEscrow ? "Fund this confidential research batch in your Privy wallet…" : "Approve the Sepolia report fee in your Privy wallet…")
         const payment = await sendTransaction({
-          to: paymentTreasury,
+          to: (usesEscrow ? escrowAddress : paymentTreasury) as `0x${string}`,
           value: paymentWei,
           chainId: 11155111,
+          ...(usesEscrow
+            ? {
+                data: encodeFunctionData({
+                  abi: nuggetBatchEscrowAbi,
+                  functionName: "fundBatch",
+                  args: [batchCommitment(batchId)],
+                }),
+              }
+            : {}),
         })
         setStatus("Payment sent. Waiting for confirmation before running CRE…")
         const res = await fetch("/api/buyer/run-cre", {
@@ -98,7 +126,6 @@ export function BuyerApp() {
       }
     })
   }
-
   const onReset = () => {
     setError(null)
     setResult(null)
@@ -209,6 +236,16 @@ export function BuyerApp() {
               </a>
             </p>
           ))}
+        </section>
+      )}
+      {result?.escrowSettlement && (
+        <section className="panel">
+          <h2>Rewards settled in escrow</h2>
+          <p className="muted">
+            The contract now holds this batch&apos;s funds. Eligible contributors claim directly, once each.
+            {" "}
+            <a href={result.escrowSettlement.explorerUrl} target="_blank" rel="noreferrer">View settlement transaction</a>
+          </p>
         </section>
       )}
 

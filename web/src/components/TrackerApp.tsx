@@ -18,6 +18,7 @@ const today = () => new Date().toISOString().slice(0, 10)
 const AGE_KEY = "nugget.profile.ageBand.v1"
 const CONTRIBUTED_ENTRY_IDS_KEY = "nugget.contributions.entryIds.v1"
 const RESEARCH_OPT_IN_KEY = "nugget.research.optedIn.v1"
+const REWARD_WALLET_KEY = "nugget.rewardWallet.address.v1"
 
 const loadContributedEntryIds = (): string[] => {
   try {
@@ -132,7 +133,8 @@ export function TrackerApp({ showRewards = false }: { showRewards?: boolean }) {
     }
     startTransition(async () => {
       localStorage.setItem(AGE_KEY, ageBand)
-      const contribution = entryToContribution(entriesToContribute, newClaimId(), ageBand)
+      const claimId = newClaimId()
+      const contribution = entryToContribution(entriesToContribute, claimId, ageBand)
       if (!contribution) {
         setError("Log at least one period before contributing.")
         return
@@ -151,12 +153,38 @@ export function TrackerApp({ showRewards = false }: { showRewards?: boolean }) {
         const res = await fetch("/api/contribute", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ contribution: encryptedContribution }),
+          body: JSON.stringify({ contribution: encryptedContribution, claimId }),
         })
         const data = (await res.json()) as ContributeResponse
         if (!res.ok || !data.ok || !data.receipt || !data.pool) {
           setError(data.error ?? "Contribute failed")
           return
+        }
+
+        // Once a contributor has chosen a separate reward wallet, bind every
+        // later opted-in contribution to it inside the same CRE-encrypted
+        // payload. The server cannot turn a wallet into an eligible claim.
+        const rewardWallet = localStorage.getItem(REWARD_WALLET_KEY)
+        if (rewardWallet && /^0x[a-fA-F0-9]{40}$/.test(rewardWallet)) {
+          try {
+            const registration = encryptForCre(
+              JSON.stringify({ claimId, walletAddress: rewardWallet }),
+              base64ToBytes(keyData.publicKey),
+            )
+            await fetch("/api/rewards/opt-in", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                walletAddress: rewardWallet,
+                claimId,
+                batchId: data.receipt.batchId,
+                registration,
+              }),
+            })
+          } catch {
+            // The health contribution was safely stored; retrying registration
+            // should not make it appear that the private entry failed to save.
+          }
         }
 
         setReceipts(saveLocalReceipt(data.receipt))
@@ -303,6 +331,7 @@ export function TrackerApp({ showRewards = false }: { showRewards?: boolean }) {
           <ContributorRewardWallet
             contributionCount={receipts.length}
             rewardBatchId={receipts[0]?.batchId ?? null}
+            latestClaimId={receipts[0]?.claimId ?? null}
           />
         )}
       </section>

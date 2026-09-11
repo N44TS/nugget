@@ -16,6 +16,9 @@ export type Contribution = {
   periodLengthDays: number
   symptoms: string[]
   ageBand: AgeBand
+  /** Present on new encrypted rows; optional so earlier local demo data stays readable. */
+  payoutWindowId?: string
+  submittedAt?: string
 }
 
 export type ContributionBatch = {
@@ -33,6 +36,7 @@ export type EncryptedContributionBatch = {
   encoding: "nugget1-contribution-batch-v1"
   epoch: string
   contributions: CreEncryptedContribution[]
+  rewardRegistrations?: CreEncryptedContribution[]
 }
 
 export const SYMPTOM_OPTIONS: { id: Symptom; label: string }[] = [

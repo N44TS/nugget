@@ -14,6 +14,7 @@ import {
 	decryptForCre,
 	type CreEncryptedContribution,
 	type AggregateReport,
+	type RewardRegistration,
 } from './aggregate'
 
 // ─── Config Schema ──────────────────────────────────────────
@@ -24,6 +25,10 @@ export const configSchema = z.object({
 	secretId: z.string(),
 	/** Minimum cohort size before aggregate cells are released. */
 	kMin: z.number().int().positive(),
+	/** The fourteen-day release whose contributors may receive this payout. */
+	rewardWindowId: z.string().optional(),
+	/** UTC cut-off for the buyer's rolling report (normally six months). */
+	reportSince: z.string().optional(),
 })
 type Config = z.infer<typeof configSchema>
 
@@ -31,6 +36,7 @@ type EncryptedContributionBatch = {
 	encoding: 'nugget1-contribution-batch-v1'
 	epoch: string
 	contributions: CreEncryptedContribution[]
+	rewardRegistrations?: CreEncryptedContribution[]
 }
 
 const isEncryptedBatch = (raw: unknown): raw is EncryptedContributionBatch => {
@@ -99,7 +105,17 @@ export const unlockContributionBatch = (body: string, privateKeyBase64: string) 
 		)
 	})
 
-	return parseContributionBatch({ epoch: parsed.epoch, contributions })
+	const rewardRegistrations = (parsed.rewardRegistrations ?? []).map((envelope) => {
+		if (
+			envelope.encoding !== 'nugget1-x25519-xchacha20poly1305-b64' ||
+			typeof envelope.ephemeralPublicKey !== 'string' ||
+			typeof envelope.nonce !== 'string' ||
+			typeof envelope.payload !== 'string'
+		) throw new Error('invalid encrypted reward registration')
+		return JSON.parse(decryptForCre(envelope, privateKey, base64ToBytes)) as RewardRegistration
+	})
+
+	return { batch: parseContributionBatch({ epoch: parsed.epoch, contributions }), rewardRegistrations }
 }
 
 // ─── TEE Cron Callback ──────────────────────────────────────
@@ -128,12 +144,21 @@ export const onCronTrigger = (runtime: TeeRuntime<Config>): string => {
 	const body = text(response)
 
 	// Confidential work: decrypt (if needed), validate, k-anon aggregate
-	const batch = unlockContributionBatch(body, encryptionPrivateKey)
-	const report: AggregateReport = aggregateContributions(batch, config.kMin)
+	const unlocked = unlockContributionBatch(body, encryptionPrivateKey)
+	const report: AggregateReport = aggregateContributions(
+		unlocked.batch,
+		config.kMin,
+		unlocked.rewardRegistrations,
+		config.rewardWindowId,
+		config.reportSince,
+	)
 	const summary = formatPublicSummary(report)
 
 	// Simulation-only log — no raw rows, no secret
 	runtime.log(`Enclave aggregation complete. ${summary}`)
+	// In production this becomes encrypted per-wallet delivery. In the simulator
+	// it is a server-only claim package: no health record leaves the enclave.
+	runtime.log(`NUGGET_CLAIM_PROOFS=${JSON.stringify(report.rewardProofs)}`)
 
 	// Step 4: only public aggregate fields cross to the DON
 	const donRuntime = runtime.usingTheDons()

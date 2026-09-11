@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
-import { isoWeekEpoch } from "@/lib/cycle"
-import { saveRewardOptIn } from "@/lib/server-batch"
+import { addEncryptedRewardRegistration } from "@/lib/server-batch"
+import type { CreEncryptedContribution } from "@/lib/crypto"
 
 export async function POST(request: Request) {
   let body: unknown
@@ -10,18 +10,34 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, error: "invalid JSON" }, { status: 400 })
   }
 
-  const walletAddress = (body as { walletAddress?: unknown }).walletAddress
+  const parsed = body as {
+    walletAddress?: unknown
+    claimId?: unknown
+    batchId?: unknown
+    registration?: CreEncryptedContribution
+  }
+  const { walletAddress, claimId, registration } = parsed
   if (typeof walletAddress !== "string" || !/^0x[a-fA-F0-9]{40}$/.test(walletAddress)) {
     return NextResponse.json({ ok: false, error: "valid Ethereum wallet address required" }, { status: 400 })
   }
 
-  const batchId = isoWeekEpoch()
+  const batchId = typeof parsed.batchId === "string" ? parsed.batchId : ""
+  if (!/^\d{4}-P\d{2}$/.test(batchId)) {
+    return NextResponse.json({ error: "A valid payout window is required" }, { status: 400 })
+  }
+  if (
+    typeof claimId !== "string" ||
+    registration?.encoding !== "nugget1-x25519-xchacha20poly1305-b64" ||
+    typeof registration.ephemeralPublicKey !== "string" ||
+    typeof registration.nonce !== "string" ||
+    typeof registration.payload !== "string"
+  ) {
+    return NextResponse.json({ ok: false, error: "encrypted reward registration and claim ID required" }, { status: 400 })
+  }
   try {
-    await saveRewardOptIn({
+    await addEncryptedRewardRegistration({
       batchId,
-      walletAddress: walletAddress.toLowerCase(),
-      optedInAt: new Date().toISOString(),
-      status: "eligible",
+      envelope: registration,
     })
   } catch (error) {
     console.error("[rewards] opt-in persistence failed", error)

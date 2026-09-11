@@ -88,6 +88,11 @@ export type RewardOptIn = {
   status: "eligible" | "paid" | "excluded"
 }
 
+export type EncryptedRewardRegistration = {
+  batchId: string
+  envelope: CreEncryptedContribution
+}
+
 export type RewardAccounting = {
   batchId: string
   contributorCount: number
@@ -106,6 +111,8 @@ export type RewardAllocation = {
   status: "allocated" | "paid"
   transactionHash: string | null
 }
+
+export type RewardClaimProof = { batchId: string; walletAddress: string; proof: `0x${string}`[] }
 
 export function poolDataDir(): string {
   return hostedStorageConfigured ? "supabase:nugget_contributions" : dataDir
@@ -149,19 +156,18 @@ async function withPoolLock<T>(fn: () => Promise<T>): Promise<T> {
 
 export async function loadEncryptedPool(): Promise<EncryptedContributionBatch | null> {
   if (hostedStorageConfigured) {
-    const latest = await supabaseRequest<Array<{ epoch: string }>>(
-      "nugget_contributions?select=epoch&order=created_at.desc&limit=1",
-    )
-    if (latest.length === 0) return null
-    const epoch = latest[0]!.epoch
     const rows = await supabaseRequest<Array<{ envelope: CreEncryptedContribution; epoch: string }>>(
-      `nugget_contributions?select=epoch,envelope&epoch=eq.${encodeURIComponent(epoch)}&order=created_at.asc`,
+      "nugget_contributions?select=epoch,envelope&order=created_at.asc",
     )
     if (rows.length === 0) return null
+    const registrations = await supabaseRequest<Array<{ envelope: CreEncryptedContribution }>>(
+      "nugget_reward_registrations?select=envelope&order=created_at.asc",
+    ).catch(() => [])
     return {
       encoding: "nugget1-contribution-batch-v1",
-      epoch,
+      epoch: "rolling-six-month-pool",
       contributions: rows.map((row) => row.envelope),
+      rewardRegistrations: registrations.map((row) => row.envelope),
     }
   }
   try {
@@ -172,7 +178,7 @@ export async function loadEncryptedPool(): Promise<EncryptedContributionBatch | 
       !parsed.epoch ||
       !Array.isArray(parsed.contributions)
     ) return null
-    return parsed
+    return { ...parsed, rewardRegistrations: parsed.rewardRegistrations ?? [] }
   } catch {
     return null
   }
@@ -201,16 +207,43 @@ export async function addEncryptedContribution(
   return withPoolLock(async () => {
     const prior = (await loadEncryptedPool()) ?? {
       encoding: "nugget1-contribution-batch-v1" as const,
-      epoch: batchId,
+      // The encrypted pool is deliberately rolling. The encrypted row itself
+      // carries its payoutWindowId; the outer epoch is no longer a sale unit.
+      epoch: "rolling-six-month-pool",
       contributions: [],
     }
     const next: EncryptedContributionBatch = {
       encoding: "nugget1-contribution-batch-v1",
       epoch: batchId,
       contributions: [...prior.contributions, contribution],
+      rewardRegistrations: prior.rewardRegistrations ?? [],
     }
     await writePoolAtomic(next)
     return next
+  })
+}
+
+export async function addEncryptedRewardRegistration(registration: EncryptedRewardRegistration): Promise<void> {
+  if (hostedStorageConfigured) {
+    await supabaseRequest("nugget_reward_registrations", {
+      method: "POST",
+      headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+      body: JSON.stringify({
+        batch_id: registration.batchId,
+        envelope: registration.envelope,
+      }),
+    })
+    return
+  }
+  await withPoolLock(async () => {
+    const pool = await loadEncryptedPool()
+    if (!pool) throw new Error("Contribution pool is unavailable")
+    const registrations = pool.rewardRegistrations ?? []
+    const next = {
+      ...pool,
+      rewardRegistrations: [...registrations, registration.envelope],
+    }
+    await writePoolAtomic(next)
   })
 }
 
@@ -228,12 +261,23 @@ export async function clearPool(): Promise<void> {
       `nugget_reward_opt_ins?id=not.is.null`,
       { method: "DELETE", headers: { Prefer: "return=minimal" } },
     )
+    await supabaseRequest(
+      `nugget_reward_registrations?id=not.is.null`,
+      { method: "DELETE", headers: { Prefer: "return=minimal" } },
+    ).catch(() => undefined)
+    await supabaseRequest(
+      `nugget_reward_claim_proofs?batch_id=not.is.null`,
+      { method: "DELETE", headers: { Prefer: "return=minimal" } },
+    ).catch(() => undefined)
     return
   }
   await mkdir(dataDir, { recursive: true })
   await unlink(poolPath).catch(() => undefined)
   await unlink(path.join(dataDir, "receipts.json")).catch(() => undefined)
   await unlink(path.join(dataDir, "reward-opt-ins.json")).catch(() => undefined)
+  await unlink(path.join(dataDir, "reward-registrations.json")).catch(() => undefined)
+  const proofFiles = await fs.promises.readdir(dataDir).catch(() => [])
+  await Promise.all(proofFiles.filter((name) => name.startsWith("reward-proofs-") && name.endsWith(".json")).map((name) => unlink(path.join(dataDir, name)).catch(() => undefined)))
   const accountingFiles = await fs.promises.readdir(dataDir).catch(() => [])
   await Promise.all(
     accountingFiles
@@ -389,6 +433,39 @@ export async function loadRewardAllocations(batchId: string): Promise<RewardAllo
     ).allocations as RewardAllocation[]
   } catch {
     return []
+  }
+}
+
+export async function saveRewardClaimProofs(batchId: string, proofs: Record<string, `0x${string}`[]>): Promise<void> {
+  const rows = Object.entries(proofs).map(([walletAddress, proof]) => ({ batchId, walletAddress: walletAddress.toLowerCase(), proof }))
+  if (hostedStorageConfigured) {
+    for (const row of rows) {
+      await supabaseRequest("nugget_reward_claim_proofs?on_conflict=batch_id,wallet_address", {
+        method: "POST",
+        headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+        body: JSON.stringify({ batch_id: row.batchId, wallet_address: row.walletAddress, proof: row.proof }),
+      })
+    }
+    return
+  }
+  await withPoolLock(async () => {
+    await mkdir(dataDir, { recursive: true })
+    await writeFile(path.join(dataDir, `reward-proofs-${batchId}.json`), JSON.stringify(rows, null, 2), "utf8")
+  })
+}
+
+export async function loadRewardClaimProof(batchId: string, walletAddress: string): Promise<`0x${string}`[] | null> {
+  if (hostedStorageConfigured) {
+    const rows = await supabaseRequest<Array<{ proof: `0x${string}`[] }>>(
+      `nugget_reward_claim_proofs?select=proof&batch_id=eq.${encodeURIComponent(batchId)}&wallet_address=eq.${encodeURIComponent(walletAddress.toLowerCase())}&limit=1`,
+    )
+    return rows[0]?.proof ?? null
+  }
+  try {
+    const rows = JSON.parse(await readFile(path.join(dataDir, `reward-proofs-${batchId}.json`), "utf8")) as RewardClaimProof[]
+    return rows.find((row) => row.walletAddress.toLowerCase() === walletAddress.toLowerCase())?.proof ?? null
+  } catch {
+    return null
   }
 }
 

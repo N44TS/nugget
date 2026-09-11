@@ -17,11 +17,25 @@ export const isoWeekEpoch = (d = new Date()): string => {
   return `${date.getUTCFullYear()}-W${String(week).padStart(2, "0")}`
 }
 
+/**
+ * A payout window is a fixed, UTC-aligned fourteen-day period. Data is kept
+ * available for the rolling research report, but a wallet can only earn from
+ * the window in which it contributed.
+ */
+export const payoutWindowId = (d = new Date()): string => {
+  const date = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()))
+  const yearStart = Date.UTC(date.getUTCFullYear(), 0, 1)
+  const dayIndex = Math.floor((date.getTime() - yearStart) / dayMs)
+  const period = Math.floor(dayIndex / 14) + 1
+  return `${date.getUTCFullYear()}-P${String(period).padStart(2, "0")}`
+}
+
 /** Build an anonymous contribution from logged periods + declared age band. */
 export const entryToContribution = (
   entries: CycleEntry[],
   claimId: string,
   ageBand: AgeBand,
+  payoutWindow = payoutWindowId(),
 ): Contribution | null => {
   if (entries.length === 0) return null
   const sorted = [...entries].sort((a, b) => a.periodStart.localeCompare(b.periodStart))
@@ -44,6 +58,8 @@ export const entryToContribution = (
     periodLengthDays,
     symptoms: latest.symptoms,
     ageBand,
+    payoutWindowId: payoutWindow,
+    submittedAt: new Date().toISOString(),
   }
 }
 

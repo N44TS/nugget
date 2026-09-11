@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { loadEncryptedPool, poolDataDir } from "@/lib/server-batch"
+import { payoutWindowId } from "@/lib/cycle"
 
 const K_MIN = 2
 
@@ -13,7 +14,7 @@ export async function GET() {
     ok: true,
     dataDir: poolDataDir(),
     pool: {
-      batchId: batch.epoch,
+      batchId: payoutWindowId(),
       size: batch.contributions.length,
       kAnonOk: batch.contributions.length >= K_MIN,
       aggregates: null,
