@@ -12,7 +12,7 @@ export default function Home() {
           <div className="hero-copy">
             <h1 id="page-title" className="brand">Nugget
                  <Image 
-      src="/nugget-logo.png" 
+      src="/nugget-logo2.0.png" 
       alt="Nugget logo" 
       width={42} 
       height={42} 
