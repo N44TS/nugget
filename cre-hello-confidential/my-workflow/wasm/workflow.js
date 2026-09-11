@@ -6942,6 +6942,14 @@ class AbiEncodingLengthMismatchError extends BaseError3 {
   }
 }
 
+class BytesSizeMismatchError extends BaseError3 {
+  constructor({ expectedSize, givenSize }) {
+    super(`Expected bytes${expectedSize}, got bytes${givenSize}.`, {
+      name: "BytesSizeMismatchError"
+    });
+  }
+}
+
 class InvalidAbiEncodingTypeError extends BaseError3 {
   constructor(type, { docsPath }) {
     super([
@@ -6957,6 +6965,14 @@ class InvalidArrayError extends BaseError3 {
     super([`Value "${value}" is not a valid array.`].join(`
 `), {
       name: "InvalidArrayError"
+    });
+  }
+}
+
+class UnsupportedPackedAbiType extends BaseError3 {
+  constructor(type) {
+    super(`Type "${type}" is not supported for packed encoding.`, {
+      name: "UnsupportedPackedAbiType"
     });
   }
 }
@@ -7507,6 +7523,8 @@ function sliceHex(value_, start, end, { strict } = {}) {
     assertEndOffset(value, start, end);
   return value;
 }
+var arrayRegex = /^(.*)\[([0-9]*)\]$/;
+var bytesRegex2 = /^bytes([1-9]|1[0-9]|2[0-9]|3[0-2])?$/;
 var integerRegex2 = /^(u?int)(8|16|24|32|40|48|56|64|72|80|88|96|104|112|120|128|136|144|152|160|168|176|184|192|200|208|216|224|232|240|248|256)?$/;
 function encodeAbiParameters(params, values) {
   if (params.length !== values.length)
@@ -7752,6 +7770,67 @@ function toRecoveryBit(yParityOrV) {
 }
 async function recoverAddress({ hash, signature }) {
   return publicKeyToAddress(await recoverPublicKey({ hash, signature }));
+}
+function encodePacked(types, values) {
+  if (types.length !== values.length)
+    throw new AbiEncodingLengthMismatchError({
+      expectedLength: types.length,
+      givenLength: values.length
+    });
+  const data = [];
+  for (let i = 0;i < types.length; i++) {
+    const type = types[i];
+    const value = values[i];
+    data.push(encode(type, value));
+  }
+  return concatHex(data);
+}
+function encode(type, value, isArray = false) {
+  if (type === "address") {
+    const address = value;
+    if (!isAddress(address))
+      throw new InvalidAddressError({ address });
+    return pad(address.toLowerCase(), {
+      size: isArray ? 32 : null
+    });
+  }
+  if (type === "string")
+    return stringToHex(value);
+  if (type === "bytes")
+    return value;
+  if (type === "bool")
+    return pad(boolToHex(value), { size: isArray ? 32 : 1 });
+  const intMatch = type.match(integerRegex2);
+  if (intMatch) {
+    const [_type, baseType, bits = "256"] = intMatch;
+    const size = Number.parseInt(bits) / 8;
+    return numberToHex(value, {
+      size: isArray ? 32 : size,
+      signed: baseType === "int"
+    });
+  }
+  const bytesMatch = type.match(bytesRegex2);
+  if (bytesMatch) {
+    const [_type, size] = bytesMatch;
+    if (Number.parseInt(size) !== (value.length - 2) / 2)
+      throw new BytesSizeMismatchError({
+        expectedSize: Number.parseInt(size),
+        givenSize: (value.length - 2) / 2
+      });
+    return pad(value, { dir: "right", size: isArray ? 32 : null });
+  }
+  const arrayMatch = type.match(arrayRegex);
+  if (arrayMatch && Array.isArray(value)) {
+    const [_type, childType] = arrayMatch;
+    const data = [];
+    for (let i = 0;i < value.length; i++) {
+      data.push(encode(childType, value[i], true));
+    }
+    if (data.length === 0)
+      return "0x";
+    return concatHex(data);
+  }
+  throw new UnsupportedPackedAbiType(type);
 }
 function productionEnvironment() {
   return {
@@ -14388,7 +14467,6 @@ class ZodPipeline extends ZodType {
     });
   }
 }
-
 class ZodReadonly extends ZodType {
   _parse(input) {
     const result = this._def.innerType._parse(input);
@@ -23347,6 +23425,43 @@ var _poly1305_aead = (xorStream) => (key, nonce, AAD) => {
   };
 };
 var xchacha20poly1305 = /* @__PURE__ */ wrapCipher({ blockSize: 64, nonceLength: 24, tagLength: 16, withAAD: true }, /* @__PURE__ */ _poly1305_aead(xchacha20));
+var rewardLeaf = (wallet) => keccak256(encodePacked(["address"], [getAddress(wallet)]));
+var hashPair = (a, b) => keccak256(concatHex(a.toLowerCase() < b.toLowerCase() ? [a, b] : [b, a]));
+var rewardMerkleRoot = (wallets) => {
+  let level = [...new Set(wallets.map(rewardLeaf))].sort();
+  if (level.length === 0)
+    return null;
+  while (level.length > 1) {
+    const next = [];
+    for (let i = 0;i < level.length; i += 2)
+      next.push(hashPair(level[i], level[i + 1] ?? level[i]));
+    level = next;
+  }
+  return level[0];
+};
+var rewardProofs = (wallets) => {
+  const leaves = [...new Set(wallets.map((wallet) => rewardLeaf(wallet)))].sort();
+  const leafToWallet = new Map(wallets.map((wallet) => [rewardLeaf(wallet).toLowerCase(), getAddress(wallet)]));
+  const proofs = {};
+  for (let target = 0;target < leaves.length; target += 1) {
+    let index = target;
+    let level = [...leaves];
+    const proof = [];
+    while (level.length > 1) {
+      const sibling = index % 2 === 0 ? level[index + 1] ?? level[index] : level[index - 1];
+      proof.push(sibling);
+      const next = [];
+      for (let i = 0;i < level.length; i += 2)
+        next.push(hashPair(level[i], level[i + 1] ?? level[i]));
+      index = Math.floor(index / 2);
+      level = next;
+    }
+    const wallet = leafToWallet.get(leaves[target].toLowerCase());
+    if (wallet)
+      proofs[wallet.toLowerCase()] = proof;
+  }
+  return proofs;
+};
 var CYCLE_MIN = 15;
 var CYCLE_MAX = 90;
 var PERIOD_MIN = 1;
@@ -23385,8 +23500,12 @@ var parseContributionBatch = (raw) => {
   };
 };
 var round1 = (n) => Math.round(n * 10) / 10;
-var aggregateContributions = (batch, kMin) => {
-  const valid = batch.contributions.filter(isValidContribution);
+var aggregateContributions = (batch, kMin, rewardRegistrations = [], rewardWindowId, reportSince) => {
+  const valid = batch.contributions.filter((contribution) => {
+    if (!isValidContribution(contribution))
+      return false;
+    return !reportSince || !contribution.submittedAt || contribution.submittedAt >= reportSince;
+  });
   const rejectedCount = batch.contributions.length - valid.length;
   const contributorCount = valid.length;
   const kAnonOk = contributorCount >= kMin;
@@ -23402,9 +23521,15 @@ var aggregateContributions = (batch, kMin) => {
       avgPeriodLength: null,
       symptomRates: null,
       ageBandShare: null,
-      avgCycleByAgeBand: null
+      avgCycleByAgeBand: null,
+      rewardMerkleRoot: null,
+      eligibleWalletCount: 0,
+      rewardProofs: {}
     };
   }
+  const validClaims = new Set(valid.filter((contribution) => !rewardWindowId || contribution.payoutWindowId === rewardWindowId).map((contribution) => contribution.claimId));
+  const eligibleWallets = rewardRegistrations.filter((registration) => validClaims.has(registration.claimId) && /^0x[a-fA-F0-9]{40}$/.test(registration.walletAddress)).map((registration) => registration.walletAddress);
+  const uniqueEligibleWallets = [...new Set(eligibleWallets.map((wallet) => wallet.toLowerCase()))];
   const avgCycleLength = round1(valid.reduce((sum, c) => sum + c.cycleLengthDays, 0) / contributorCount);
   const avgPeriodLength = round1(valid.reduce((sum, c) => sum + c.periodLengthDays, 0) / contributorCount);
   const symptomCounts = {};
@@ -23415,7 +23540,7 @@ var aggregateContributions = (batch, kMin) => {
     }
   }
   const symptomRates = {};
-  for (const [symptom, count] of Object.entries(symptomCounts)) {
+  for (const [symptom, count] of Object.entries(symptomCounts).sort(([a], [b]) => a.localeCompare(b))) {
     if (count >= kMin)
       symptomRates[symptom] = round1(count / contributorCount);
   }
@@ -23427,7 +23552,7 @@ var aggregateContributions = (batch, kMin) => {
   }
   const ageBandShare = {};
   const avgCycleByAgeBand = {};
-  for (const [band, count] of Object.entries(bandCounts)) {
+  for (const [band, count] of Object.entries(bandCounts).sort(([a], [b]) => a.localeCompare(b))) {
     if (count >= kMin) {
       ageBandShare[band] = round1(count / contributorCount);
       avgCycleByAgeBand[band] = round1((bandCycleSum[band] ?? 0) / count);
@@ -23443,24 +23568,29 @@ var aggregateContributions = (batch, kMin) => {
     avgCycleLength,
     avgPeriodLength,
     symptomRates,
-    ageBandShare: Object.keys(ageBandShare).length ? ageBandShare : null,
-    avgCycleByAgeBand: Object.keys(avgCycleByAgeBand).length ? avgCycleByAgeBand : null
+    ageBandShare: Object.keys(ageBandShare).sort().length ? ageBandShare : null,
+    avgCycleByAgeBand: Object.keys(avgCycleByAgeBand).sort().length ? avgCycleByAgeBand : null,
+    rewardMerkleRoot: rewardMerkleRoot(uniqueEligibleWallets),
+    eligibleWalletCount: uniqueEligibleWallets.length,
+    rewardProofs: rewardProofs(uniqueEligibleWallets)
   };
 };
 var formatPublicSummary = (report) => {
   if (!report.kAnonOk) {
     return `SUPPRESSED batch=${report.epoch} n=${report.contributorCount} kMin=${report.kMin}`;
   }
-  const symptoms = report.symptomRates ? Object.entries(report.symptomRates).map(([k, v]) => `${k}:${v}`).join(",") : "";
-  const ages = report.ageBandShare ? Object.entries(report.ageBandShare).map(([k, v]) => `${k}:${v}`).join(",") : "";
-  const avgByAge = report.avgCycleByAgeBand ? Object.entries(report.avgCycleByAgeBand).map(([k, v]) => `${k}:${v}`).join(",") : "";
-  return `OK batch=${report.epoch} n=${report.contributorCount} avgCycle=${report.avgCycleLength} avgPeriod=${report.avgPeriodLength} symptoms={${symptoms}} ageShare={${ages}} avgCycleByAge={${avgByAge}} rejected=${report.rejectedCount}`;
+  const symptoms = report.symptomRates ? Object.entries(report.symptomRates).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => `${k}:${v}`).join(",") : "";
+  const ages = report.ageBandShare ? Object.entries(report.ageBandShare).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => `${k}:${v}`).join(",") : "";
+  const avgByAge = report.avgCycleByAgeBand ? Object.entries(report.avgCycleByAgeBand).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => `${k}:${v}`).join(",") : "";
+  return `OK batch=${report.epoch} n=${report.contributorCount} avgCycle=${report.avgCycleLength} avgPeriod=${report.avgPeriodLength} symptoms={${symptoms}} ageShare={${ages}} avgCycleByAge={${avgByAge}} rejected=${report.rejectedCount} rewardRoot=${report.rewardMerkleRoot ?? "none"} eligibleWallets=${report.eligibleWalletCount}`;
 };
 var configSchema = objectType({
   schedule: stringType(),
   url: stringType(),
   secretId: stringType(),
-  kMin: numberType().int().positive()
+  kMin: numberType().int().positive(),
+  rewardWindowId: stringType().optional(),
+  reportSince: stringType().optional()
 });
 var isEncryptedBatch = (raw) => {
   if (!raw || typeof raw !== "object")
@@ -23512,7 +23642,12 @@ var unlockContributionBatch = (body, privateKeyBase64) => {
     }
     return JSON.parse(decryptForCre(envelope, privateKey, base64ToBytes2));
   });
-  return parseContributionBatch({ epoch: parsed.epoch, contributions });
+  const rewardRegistrations = (parsed.rewardRegistrations ?? []).map((envelope) => {
+    if (envelope.encoding !== "nugget1-x25519-xchacha20poly1305-b64" || typeof envelope.ephemeralPublicKey !== "string" || typeof envelope.nonce !== "string" || typeof envelope.payload !== "string")
+      throw new Error("invalid encrypted reward registration");
+    return JSON.parse(decryptForCre(envelope, privateKey, base64ToBytes2));
+  });
+  return { batch: parseContributionBatch({ epoch: parsed.epoch, contributions }), rewardRegistrations };
 };
 var onCronTrigger = (runtime) => {
   const config = runtime.config;
@@ -23529,10 +23664,11 @@ var onCronTrigger = (runtime) => {
     throw new Error(`Confidential request failed with status: ${response.statusCode}`);
   }
   const body = text(response);
-  const batch = unlockContributionBatch(body, encryptionPrivateKey);
-  const report = aggregateContributions(batch, config.kMin);
+  const unlocked = unlockContributionBatch(body, encryptionPrivateKey);
+  const report = aggregateContributions(unlocked.batch, config.kMin, unlocked.rewardRegistrations, config.rewardWindowId, config.reportSince);
   const summary = formatPublicSummary(report);
-  runtime.log(`Enclave aggregation complete. ${summary}`);
+  const simulationSummary = report.kAnonOk ? `OK batch=${report.epoch} n=${report.contributorCount} kAnon=passed rejected=${report.rejectedCount} rewardRoot=${report.rewardMerkleRoot ?? "none"} eligibleWallets=${report.eligibleWalletCount}` : `SUPPRESSED batch=${report.epoch} n=${report.contributorCount} kMin=${report.kMin}`;
+  runtime.log(`Enclave aggregation complete. ${simulationSummary}`);
   const donRuntime = runtime.usingTheDons();
   const encodedPayload = encodeAbiParameters(parseAbiParameters("string epoch, uint256 contributorCount, bool kAnonOk, string summary"), [report.epoch, BigInt(report.contributorCount), report.kAnonOk, summary]);
   donRuntime.report({
@@ -23541,7 +23677,7 @@ var onCronTrigger = (runtime) => {
     signingAlgo: "ecdsa",
     hashingAlgo: "keccak256"
   }).result();
-  return summary;
+  return simulationSummary;
 };
 function initWorkflow(config) {
   const cronTrigger = new cre.capabilities.CronCapability;

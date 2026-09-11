@@ -1,35 +1,30 @@
-Initializing...
-Loading settings...
-Checking RPC connectivity...
-Compiling workflow...
-✓ Workflow compiled
-✓ Simulation limits enabled
-  HTTP: req=120kb resp=250kb timeout=10s | ConfHTTP: req=125kb resp=500kb timeout=1m30s | Consensus obs=25kb | ChainWrite evm_report=50kb evm_gas=10000000 solana_report=265b solana_cu=300000 | WASM binary=100mb compressed=20mb
-  Binary hash: 8d1d2ef12240bebb82ff7fc712e1f701bfae945d0e854063fb181cc6b54a2e3b
-  Config hash: 4b35871e775e904ee1fe5fb9aa7666f7d8b5817940adee78de64c0ab0266b380
-2026-09-05T21:37:27Z [SIMULATION] Simulator Initialized
+Nugget official CRE Confidential Workflow simulation
+Date: 2026-09-11
+Command:
+  cre workflow simulate my-workflow --target staging-settings --non-interactive --trigger-index 0
 
-2026-09-05T21:37:27Z [SIMULATION] Running trigger trigger=cron-trigger@1.0.0
-╭────────────────────────────────────────────────────────────────────────────────────────────────────╮
-│ Trigger requested TEE Execution your trigger will run in one of the following Tees:                │
-│     - AWS Nitro in us-west-2                                                                       │
-│ The simulator is not a real TEE, and is meant to debug.                                            │
-│ Do not use it for sensitive information.                                                           │
-│ During real execution, user logs for this trigger will not be visible, and will not leave the TEE. │
-│ They are presented in the simulator for debugging only.                                            │
-│                                                                                                    │
-╰────────────────────────────────────────────────────────────────────────────────────────────────────╯
+Input:
+  Current encrypted pool served by the local Nugget web endpoint at
+  http://127.0.0.1:3000/api/contributions/encrypted
 
-2026-09-05T21:37:27Z [USER LOG] Enclave computation complete. verdict=APPROVE
+Selected output:
+  ✓ Workflow compiled
+  ✓ Simulation limits enabled
+  2026-09-11T22:22:33Z [SIMULATION] Simulator Initialized
+  2026-09-11T22:22:33Z [SIMULATION] Running trigger trigger=cron-trigger@1.0.0
+  Trigger requested TEE Execution
+      - AWS Nitro in us-west-2
+  The simulator is not a real TEE, and is meant to debug.
+  Do not use it for sensitive information.
+  During real execution, user logs for this trigger will not be visible, and will not leave the TEE.
+  2026-09-11T22:22:34Z [USER LOG] Enclave aggregation complete. OK batch=rolling-six-month-pool n=16 kAnon=passed rejected=6 rewardRoot=0x1e612c0b2c6f56b10fbdd8467eca7203977ce43267d05f2dfa7c032cf5dcc42a eligibleWallets=2
 
-✓ Workflow Simulation Result:
-"APPROVE (score: 929, secret reached API: true)"
+  ✓ Workflow Simulation Result:
+  "OK batch=rolling-six-month-pool n=16 kAnon=passed rejected=6 rewardRoot=0x1e612c0b2c6f56b10fbdd8467eca7203977ce43267d05f2dfa7c032cf5dcc42a eligibleWallets=2"
 
-2026-09-05T21:37:27Z [SIMULATION] Execution finished signal received
-2026-09-05T21:37:27Z [SIMULATION] Skipping WorkflowEngineV2
+  2026-09-11T22:22:34Z [SIMULATION] Execution finished signal received
+  2026-09-11T22:22:34Z [SIMULATION] Skipping WorkflowEngineV2
 
-╭──────────────────────────────────────────────────────╮
-│ Simulation complete! Ready to deploy your workflow?  │
-│                                                      │
-│ Run cre account access to request deployment access. │
-╰──────────────────────────────────────────────────────╯
+Safety notes:
+  No health metrics, private keys, raw ciphertext, wallet lists, or claim proofs are emitted.
+  The simulator is local evidence for handlerInTee execution, not a live TEE deployment.

@@ -153,12 +153,12 @@ export const onCronTrigger = (runtime: TeeRuntime<Config>): string => {
 		config.reportSince,
 	)
 	const summary = formatPublicSummary(report)
+	const simulationSummary = report.kAnonOk
+		? `OK batch=${report.epoch} n=${report.contributorCount} kAnon=passed rejected=${report.rejectedCount} rewardRoot=${report.rewardMerkleRoot ?? 'none'} eligibleWallets=${report.eligibleWalletCount}`
+		: `SUPPRESSED batch=${report.epoch} n=${report.contributorCount} kMin=${report.kMin}`
 
 	// Simulation-only log — no raw rows, no secret
-	runtime.log(`Enclave aggregation complete. ${summary}`)
-	// In production this becomes encrypted per-wallet delivery. In the simulator
-	// it is a server-only claim package: no health record leaves the enclave.
-	runtime.log(`NUGGET_CLAIM_PROOFS=${JSON.stringify(report.rewardProofs)}`)
+	runtime.log(`Enclave aggregation complete. ${simulationSummary}`)
 
 	// Step 4: only public aggregate fields cross to the DON
 	const donRuntime = runtime.usingTheDons()
@@ -179,7 +179,7 @@ export const onCronTrigger = (runtime: TeeRuntime<Config>): string => {
 		})
 		.result()
 
-	return summary
+	return simulationSummary
 }
 
 // ─── Workflow Init ──────────────────────────────────────────

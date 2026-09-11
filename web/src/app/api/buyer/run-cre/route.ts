@@ -229,6 +229,10 @@ async function runLocalCreSimulation(
   const privateKeyB64 = process.env.CRE_ENCRYPTION_PRIVATE_KEY
   if (!privateKeyB64) return { ok: false, summary: null, log: "", error: "CRE_ENCRYPTION_PRIVATE_KEY is not configured" }
   try {
+    console.log("[cre local] starting encrypted contribution simulation", {
+      contributionCount: pool.contributions.length,
+      kMin: K_MIN,
+    })
     const privateKey = base64ToBytes(privateKeyB64)
     if (privateKey.length !== 32) throw new Error("CRE_ENCRYPTION_PRIVATE_KEY must decode to 32 bytes")
     const decrypt = (envelope: CreEncryptedContribution): unknown => {
@@ -242,6 +246,9 @@ async function runLocalCreSimulation(
     const reportContributions = contributions.filter(
       (contribution) => !contribution.submittedAt || contribution.submittedAt >= sixMonthsAgo.toISOString(),
     )
+    console.log("[cre local] decrypted and filtered contributions", {
+      count: reportContributions.length,
+    })
     const report = aggregateContributions({ epoch: pool.epoch, contributions: reportContributions }, K_MIN)
     const eligibleClaims = new Set(
       reportContributions
@@ -265,8 +272,15 @@ async function runLocalCreSimulation(
     const tree = uniqueWallets.length ? buildRewardTree(uniqueWallets) : null
     const proofs = Object.fromEntries(uniqueWallets.map((wallet) => [wallet, rewardProof(uniqueWallets, wallet)]))
     const summary = `${formatPublicSummary(report)} rewardRoot=${tree?.root ?? "none"} eligibleWallets=${uniqueWallets.length}`
+    console.log("[cre local] aggregation complete", {
+      validCount: report.validCount,
+      rejectedCount: report.rejectedCount,
+      eligibleWallets: uniqueWallets.length,
+      hasRewardRoot: Boolean(tree?.root),
+    })
     return { ok: true, summary, log: `NUGGET_CLAIM_PROOFS=${JSON.stringify(proofs)}` }
   } catch (cause) {
+    console.error("[cre local] simulation failed", cause)
     return { ok: false, summary: null, log: "", error: cause instanceof Error ? cause.message : "Local CRE simulation failed" }
   }
 }

@@ -28,10 +28,6 @@ services:
         sync: false
       - key: CRE_ENCRYPTION_PRIVATE_KEY
         sync: false
-      # Fallback used for the hackathon demo while Confidential Workflows
-      # access is pending. It mirrors the CRE pipeline locally; it is not a TEE.
-      - key: NUGGET_LOCAL_CRE_SIMULATION
-        value: "true"
       - key: NUGGET_BATCH_ESCROW_ADDRESS
         sync: false
       - key: NEXT_PUBLIC_NUGGET_BATCH_ESCROW_ADDRESS
