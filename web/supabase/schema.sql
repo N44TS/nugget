@@ -46,6 +46,36 @@ create index if not exists nugget_reward_opt_ins_batch_idx
 
 alter table public.nugget_reward_opt_ins enable row level security;
 
+create table if not exists public.nugget_reward_registrations (
+  id uuid primary key default gen_random_uuid(),
+  batch_id text not null,
+  envelope jsonb not null,
+  created_at timestamptz not null default now()
+);
+
+-- Privacy migration for databases created by an earlier demo build. A reward
+-- registration's claim and wallet are now carried only in `envelope`, which
+-- is decrypted in the CRE handler. Do not retain their plaintext pairing.
+alter table public.nugget_reward_registrations drop column if exists claim_id;
+alter table public.nugget_reward_registrations drop column if exists wallet_address;
+
+create index if not exists nugget_reward_registrations_batch_idx
+  on public.nugget_reward_registrations (batch_id, created_at);
+
+alter table public.nugget_reward_registrations enable row level security;
+
+-- The CRE simulation writes a Merkle proof produced from its decrypted,
+-- validated cohort. This contains no cycle information.
+create table if not exists public.nugget_reward_claim_proofs (
+  batch_id text not null,
+  wallet_address text not null,
+  proof jsonb not null,
+  created_at timestamptz not null default now(),
+  primary key (batch_id, wallet_address)
+);
+
+alter table public.nugget_reward_claim_proofs enable row level security;
+
 create table if not exists public.nugget_reward_batches (
   batch_id text primary key,
   contributor_count integer not null,

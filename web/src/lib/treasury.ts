@@ -6,12 +6,47 @@ import {
   markRewardAllocationPaid,
   markRewardBatchPaid,
 } from "./server-batch"
+import { batchCommitment, escrowAddress, nuggetBatchEscrowAbi } from "./escrow"
 
 export type PayoutResult = {
   status: "paid" | "not-configured" | "held"
   batchId: string
   payouts: Array<{ walletAddress: string; amountWei: string; transactionHash: string }>
   error?: string
+}
+
+/**
+ * Demo settlement relay. In a live CRE deployment, the DON's verified report
+ * should invoke the same `settleBatch` call instead of this server signer.
+ */
+export async function settleEscrowBatch(
+  batchId: string,
+  rewardMerkleRoot: `0x${string}`,
+  eligibleWalletCount: number,
+): Promise<{ txHash: string } | null> {
+  const contract = escrowAddress()
+  if (!contract) return null
+  const privateKey = process.env.SETTLEMENT_REPORTER_PRIVATE_KEY
+  if (!privateKey) throw new Error("SETTLEMENT_REPORTER_PRIVATE_KEY is not configured")
+  if (!/^0x[0-9a-fA-F]{64}$/.test(privateKey)) {
+    throw new Error("SETTLEMENT_REPORTER_PRIVATE_KEY must be a 32-byte hex private key")
+  }
+  if (!/^0x[a-fA-F0-9]{64}$/.test(rewardMerkleRoot) || !Number.isSafeInteger(eligibleWalletCount) || eligibleWalletCount < 1) {
+    throw new Error("CRE did not produce a valid reward settlement commitment")
+  }
+  const account = privateKeyToAccount(privateKey as `0x${string}`)
+  const client = createWalletClient({
+    account,
+    chain: sepolia,
+    transport: http(process.env.SEPOLIA_RPC_URL || "https://ethereum-sepolia-rpc.publicnode.com"),
+  })
+  const hash = await client.writeContract({
+    address: contract,
+    abi: nuggetBatchEscrowAbi,
+    functionName: "settleBatch",
+    args: [batchCommitment(batchId), rewardMerkleRoot, BigInt(eligibleWalletCount)],
+  })
+  return { txHash: hash }
 }
 
 export async function payRewards(batchId: string): Promise<PayoutResult> {
