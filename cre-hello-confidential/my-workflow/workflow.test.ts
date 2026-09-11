@@ -137,6 +137,27 @@ describe('aggregate', () => {
 		expect(report.avgCycleByAgeBand?.['25-34']).toBeGreaterThan(20)
 	})
 
+	test('only pays wallets tied to a valid contribution in the selected payout window', () => {
+		const report = aggregateContributions(
+			{
+				epoch: 'rolling-six-month-pool',
+				contributions: [
+					{ claimId: 'current', cycleLengthDays: 28, periodLengthDays: 5, symptoms: [], ageBand: '25-34', payoutWindowId: '2026-P19' },
+					{ claimId: 'older', cycleLengthDays: 29, periodLengthDays: 5, symptoms: [], ageBand: '25-34', payoutWindowId: '2026-P18' },
+				],
+			},
+			2,
+			[
+				{ claimId: 'current', walletAddress: '0x0000000000000000000000000000000000000001' },
+				{ claimId: 'older', walletAddress: '0x0000000000000000000000000000000000000002' },
+			],
+			'2026-P19',
+		)
+		expect(report.contributorCount).toBe(2)
+		expect(report.eligibleWalletCount).toBe(1)
+		expect(report.rewardMerkleRoot).not.toBeNull()
+	})
+
 	test('authenticated encryption round-trip', () => {
 		const plain = JSON.stringify(sampleBatch)
 		const nonce = new Uint8Array(24)
@@ -146,8 +167,8 @@ describe('aggregate', () => {
 
 	test('unlockContributionBatch decrypts every browser envelope', () => {
 		const batch = unlockContributionBatch(encryptedBatchBody(), PRIVATE_KEY_B64)
-		expect(batch.epoch).toBe('2026-W36')
-		expect(batch.contributions).toHaveLength(7)
+		expect(batch.batch.epoch).toBe('2026-W36')
+		expect(batch.batch.contributions).toHaveLength(7)
 	})
 
 	test('CRE decrypts a browser-style X25519 envelope', () => {

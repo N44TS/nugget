@@ -2,5 +2,7 @@
   "schedule": "0 */1 * * * *",
   "url": "http://127.0.0.1:3000/api/contributions/encrypted",
   "secretId": "CRE_ENCRYPTION_PRIVATE_KEY",
-  "kMin": 2
+  "kMin": 2,
+  "rewardWindowId": "2026-P19",
+  "reportSince": "2026-03-11T00:00:00.000Z"
 }
