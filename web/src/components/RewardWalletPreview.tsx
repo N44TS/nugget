@@ -1,6 +1,7 @@
 "use client"
 
 import { usePrivy } from "@privy-io/react-auth"
+import { WalletCenter } from "@/components/WalletCenter"
 
 export function RewardWalletPreview() {
   const { ready, authenticated, user, login, logout } = usePrivy()
@@ -25,6 +26,7 @@ export function RewardWalletPreview() {
           Sign in and create buyer wallet
         </button>
       )}
+      {authenticated && wallet && <WalletCenter address={wallet.address} title="Buyer wallet center" allowExport />}
     </section>
   )
 }

@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { usePrivy, useSendTransaction } from "@privy-io/react-auth"
-import { useState, useTransition } from "react"
+import { useEffect, useState, useTransition } from "react"
 import { encodeFunctionData, formatEther } from "viem"
 import { payoutWindowId } from "@/lib/cycle"
 import { batchCommitment, nuggetBatchEscrowAbi, purchaseBatchId } from "@/lib/escrow"
@@ -18,6 +18,30 @@ const paymentEth = (() => {
   }
 })()
 
+type PublicReport = {
+  batchId: string
+  contributorCount: number
+  avgCycleLength: number | null
+  avgPeriodLength: number | null
+  symptomRates: Record<string, number> | null
+  ageBandShare: Record<string, number> | null
+  avgCycleByAgeBand: Record<string, number> | null
+  rejectedCount: number
+  kMin: number
+  kAnonOk?: boolean
+  rewardRoot?: string | null
+  eligibleWallets?: number
+}
+
+type BuyerReport = {
+  txHash: string
+  buyerAddress: string
+  amountWei: string
+  batchId: string | null
+  createdAt: string
+  reportSummary: string
+}
+
 type RunCreResponse = {
   ok?: boolean
   error?: string
@@ -26,20 +50,7 @@ type RunCreResponse = {
   note?: string
   creLogTail?: string
   dataDir?: string
-  report?: {
-    batchId: string
-    contributorCount: number
-    avgCycleLength: number | null
-    avgPeriodLength: number | null
-    symptomRates: Record<string, number> | null
-    ageBandShare: Record<string, number> | null
-    avgCycleByAgeBand: Record<string, number> | null
-    rejectedCount: number
-    kMin: number
-    kAnonOk?: boolean
-    rewardRoot?: string | null
-    eligibleWallets?: number
-  } | null
+  report?: PublicReport | null
   poolSize?: number
   claimIds?: string[]
   payment?: {
@@ -66,15 +77,90 @@ type RunCreResponse = {
   } | null
 }
 
+const parseReportMap = (value: string): Record<string, number> | null => {
+  const entries = value.split(",").filter(Boolean).map((entry) => entry.split(":"))
+  return entries.length ? Object.fromEntries(entries.map(([key, number]) => [key, Number(number)])) : null
+}
+
+const parseStoredReport = (summary: string): PublicReport | null => {
+  const suppressed = summary.match(/^SUPPRESSED batch=(\S+) n=(\d+) kMin=(\d+)/)
+  if (suppressed) {
+    return {
+      batchId: suppressed[1]!,
+      contributorCount: Number(suppressed[2]),
+      avgCycleLength: null,
+      avgPeriodLength: null,
+      symptomRates: null,
+      ageBandShare: null,
+      avgCycleByAgeBand: null,
+      rejectedCount: 0,
+      kMin: Number(suppressed[3]),
+      kAnonOk: false,
+      rewardRoot: null,
+      eligibleWallets: 0,
+    }
+  }
+  const match = summary.match(
+    /^OK batch=(\S+) n=(\d+) avgCycle=([\d.]+) avgPeriod=([\d.]+) symptoms=\{([^}]*)\} ageShare=\{([^}]*)\} avgCycleByAge=\{([^}]*)\} kAnon=passed rejected=(\d+) rewardRoot=(\S+) eligibleWallets=(\d+)/,
+  )
+  if (!match) return null
+  return {
+    batchId: match[1]!,
+    contributorCount: Number(match[2]),
+    avgCycleLength: Number(match[3]),
+    avgPeriodLength: Number(match[4]),
+    symptomRates: parseReportMap(match[5]),
+    ageBandShare: parseReportMap(match[6]),
+    avgCycleByAgeBand: parseReportMap(match[7]),
+    rejectedCount: Number(match[8]),
+    kMin: 2,
+    kAnonOk: true,
+    rewardRoot: match[9] === "none" ? null : match[9]!,
+    eligibleWallets: Number(match[10]),
+  }
+}
+
 export function BuyerApp() {
   const { authenticated, user } = usePrivy()
   const { sendTransaction } = useSendTransaction()
   const [pending, startTransition] = useTransition()
-  const [resetting, setResetting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [status, setStatus] = useState<string | null>(null)
   const [result, setResult] = useState<RunCreResponse | null>(null)
+  const [previousReports, setPreviousReports] = useState<BuyerReport[]>([])
   const wallet = user?.linkedAccounts.find((account) => account.type === "wallet")
+
+  useEffect(() => {
+    if (!wallet?.address) {
+      setPreviousReports([])
+      return
+    }
+    fetch(`/api/buyer/reports?buyerAddress=${encodeURIComponent(wallet.address)}`, { cache: "no-store" })
+      .then(async (response) => {
+        if (!response.ok) return
+        const data = (await response.json()) as { reports?: BuyerReport[] }
+        setPreviousReports(data.reports ?? [])
+      })
+      .catch(() => undefined)
+  }, [wallet?.address])
+
+  const openPreviousReport = (report: BuyerReport) => {
+    if (!report.reportSummary) return
+    setError(null)
+    setStatus(null)
+    setResult({
+      ok: true,
+      source: "stored-buyer-report",
+      creSummary: report.reportSummary,
+      report: parseStoredReport(report.reportSummary),
+      payment: {
+        txHash: report.txHash,
+        status: "completed",
+        explorerUrl: `https://sepolia.etherscan.io/tx/${report.txHash}`,
+      },
+      note: "Stored report snapshot from a completed Sepolia payment.",
+    })
+  }
 
   const onRun = () => {
     setError(null)
@@ -138,27 +224,6 @@ export function BuyerApp() {
       }
     })
   }
-  const onReset = () => {
-    setError(null)
-    setResult(null)
-    setResetting(true)
-    startTransition(async () => {
-      try {
-        const res = await fetch("/api/pool/reset", { method: "POST" })
-        const data = await res.json()
-        if (!res.ok) {
-          setError(data.error ?? "Reset failed")
-        } else {
-          setStatus("Pool cleared. Opt in again from :3000 and :3001, then run CRE.")
-        }
-      } catch {
-        setError("Network error on reset")
-      } finally {
-        setResetting(false)
-      }
-    })
-  }
-
   return (
     <div className="stack">
       <p className="lede">
@@ -192,7 +257,7 @@ export function BuyerApp() {
         )}
         <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap" }}>
           <button type="button" className="btn accent" disabled={pending} onClick={onRun}>
-            {pending && !resetting ? (
+            {pending ? (
               <>
                 <span className="spinner" aria-hidden="true" />
                 Running CRE…
@@ -201,11 +266,25 @@ export function BuyerApp() {
               "Pay and run CRE report"
             )}
           </button>
-          <button type="button" className="btn primary" disabled={pending || resetting} onClick={onReset}>
-            {resetting ? "Clearing…" : "Clear pool"}
-          </button>
         </div>
       </section>
+
+      {previousReports.length > 0 && (
+        <section className="panel" aria-labelledby="previous-reports-heading">
+          <h2 id="previous-reports-heading">Previous reports</h2>
+          <p className="muted">Paid report snapshots saved to your buyer wallet.</p>
+          <ul className="history">
+            {previousReports.map((report) => (
+              <li key={report.txHash}>
+                <span className="range">{new Date(report.createdAt).toLocaleString()}</span>
+                <button type="button" className="btn secondary" onClick={() => openPreviousReport(report)}>
+                  Open report
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       {status && <p className="banner ok" role="status">{status}</p>}
       {error && <p className="banner err" role="alert">{error}</p>}

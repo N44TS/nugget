@@ -344,6 +344,23 @@ export async function loadBuyerPayment(txHash: string): Promise<BuyerPaymentRece
   }
 }
 
+export async function listBuyerPayments(buyerAddress: string): Promise<BuyerPaymentReceipt[]> {
+  const normalizedAddress = buyerAddress.toLowerCase()
+  if (hostedStorageConfigured) {
+    return supabaseRequest<BuyerPaymentReceipt[]>(
+      `nugget_buyer_payments?select=txHash:tx_hash,buyerAddress:buyer_address,amountWei:amount_wei,batchId:batch_id,status,reportSummary:report_summary,createdAt:created_at,updatedAt:updated_at&buyer_address=eq.${encodeURIComponent(normalizedAddress)}&status=eq.completed&order=created_at.desc`,
+    )
+  }
+  try {
+    const payments = JSON.parse(await readFile(path.join(dataDir, "buyer-payments.json"), "utf8")) as BuyerPaymentReceipt[]
+    return payments
+      .filter((payment) => payment.buyerAddress.toLowerCase() === normalizedAddress && payment.status === "completed")
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+  } catch {
+    return []
+  }
+}
+
 export async function saveBuyerPayment(payment: BuyerPaymentReceipt): Promise<void> {
   if (hostedStorageConfigured) {
     await supabaseRequest("nugget_buyer_payments", {

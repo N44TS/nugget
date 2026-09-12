@@ -7,6 +7,7 @@ import { useSendTransaction } from "@privy-io/react-auth"
 import { batchCommitment, nuggetBatchEscrowAbi } from "@/lib/escrow"
 import { payoutWindowId } from "@/lib/cycle"
 import { base64ToBytes, encryptForCre } from "@/lib/crypto"
+import { WalletCenter } from "@/components/WalletCenter"
 
 const WALLET_KEY = "nugget.rewardWallet.address.v1"
 const WALLET_BATCH_KEY = "nugget.rewardWallet.batchId.v1"
@@ -136,6 +137,7 @@ export function ContributorRewardWallet({ contributionCount, rewardBatchId, late
             Reward wallet ready: {address}
             {batchId && <> · eligible in payout window {batchId}</>}
           </p>
+          <WalletCenter address={address} title="Contributor wallet center" allowExport={authenticated} />
           {claimBatchIds.length > 0 && /^0x[a-fA-F0-9]{40}$/.test(escrowAddress) && (
             <button type="button" className="btn accent" onClick={claimReward} disabled={claiming || !ready}>
               {claiming ? "Claiming reward…" : `Claim reward (${claimBatchIds.length} available)`}
