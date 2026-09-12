@@ -37,9 +37,21 @@ export const nuggetBatchEscrowAbi = [
     ],
     outputs: [],
   },
+  {
+    type: "function",
+    name: "claimed",
+    stateMutability: "view",
+    inputs: [
+      { name: "batchId", type: "bytes32" },
+      { name: "wallet", type: "address" },
+    ],
+    outputs: [{ name: "", type: "bool" }],
+  },
 ] as const
 
 export const batchCommitment = (batchId: string): Hex => keccak256(stringToHex(batchId))
+export const purchaseBatchId = (payoutWindowId: string, paymentTxHash: string): string =>
+  `${payoutWindowId}:${paymentTxHash.toLowerCase()}`
 export const rewardLeaf = (wallet: string): Hex => keccak256(encodePacked(["address"], [getAddress(wallet)]))
 
 const hashPair = (a: Hex, b: Hex): Hex => keccak256(concatHex(a.toLowerCase() < b.toLowerCase() ? [a, b] : [b, a]))

@@ -10,8 +10,14 @@ import {
 import { x25519 } from "@noble/curves/ed25519.js"
 import { xchacha20poly1305 } from "@noble/ciphers/chacha.js"
 import { sha256 } from "@noble/hashes/sha2.js"
+import { purchaseBatchId } from "../src/lib/escrow"
 
 describe("real-only aggregate", () => {
+  test("creates a distinct purchase batch for every buyer payment", () => {
+    expect(purchaseBatchId("2026-P19", "0xAAA")).not.toBe(purchaseBatchId("2026-P19", "0xBBB"))
+    expect(purchaseBatchId("2026-P19", "0xAAA")).toContain("2026-P19:")
+  })
+
   test("one user is suppressed until a second user contributes", () => {
     const report = aggregateContributions(
       {

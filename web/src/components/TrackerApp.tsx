@@ -224,27 +224,10 @@ export function TrackerApp({ showRewards = false }: { showRewards?: boolean }) {
     <div className="stack tracker-flow">
       <p className="flow-tools">Testing research aggregates? <Link href="/buyer">Open the buyer console →</Link></p>
 
-      <section className="panel step-panel profile-panel" aria-labelledby="profile-heading">
-        <p className="step-label"><span>1</span> PROFILE</p>
-        <h2 id="profile-heading">Choose an age band</h2>
-        <p className="lede">This is not needed for private tracking. It is only used if you later choose to contribute an anonymous summary — never your name or birthday.</p>
-        <div className="chips">
-          {AGE_BAND_OPTIONS.map((opt) => (
-            <button
-              key={opt.id}
-              type="button"
-              className={ageBand === opt.id ? "chip on" : "chip"}
-              aria-pressed={ageBand === opt.id}
-              onClick={() => setAgeBand(opt.id)}
-            >
-              {opt.label}
-            </button>
-          ))}
-        </div>
-      </section>
+     
 
-      <section className="panel step-panel log-panel" aria-labelledby="log-heading">
-        <p className="step-label"><span>2</span> PRIVATE LOG</p>
+      <section className="panel step-panel profile-panel" aria-labelledby="log-heading">
+        <p className="step-label">PRIVATE LOG</p>
         <h2 id="log-heading">Log a period</h2>
         <p className="lede">This is encrypted on this device. Saving it does <strong>not</strong> upload anything.</p>
 
@@ -285,8 +268,27 @@ export function TrackerApp({ showRewards = false }: { showRewards?: boolean }) {
         {saveStatus && <p className="inline-confirmation" role="status">{saveStatus}</p>}
       </section>
 
+       <section className="panel step-panel log-panel" aria-labelledby="profile-heading">
+        <p className="step-label">PROFILE</p>
+        <h2 id="profile-heading">Choose an age band</h2>
+        <p className="lede">This is not needed for private tracking. It is only used if you later choose to contribute an anonymous summary — never your name or birthday.</p>
+        <div className="chips">
+          {AGE_BAND_OPTIONS.map((opt) => (
+            <button
+              key={opt.id}
+              type="button"
+              className={ageBand === opt.id ? "chip on" : "chip"}
+              aria-pressed={ageBand === opt.id}
+              onClick={() => setAgeBand(opt.id)}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      </section>
+
       <section className="panel step-panel optin-panel" aria-labelledby="optin-heading">
-        <p className="step-label"><span>3</span> OPTIONAL CONTRIBUTION</p>
+        <p className="step-label"> OPTIONAL CONTRIBUTION</p>
         <h2 id="optin-heading">Contribute to research</h2>
         <p className="lede">
           Your private diary never leaves this device. If you opt in, we send only an encrypted, anonymous summary of your cycle and symptoms to a shared research batch.

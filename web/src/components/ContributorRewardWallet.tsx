@@ -5,11 +5,12 @@ import { useEffect, useState } from "react"
 import { encodeFunctionData } from "viem"
 import { useSendTransaction } from "@privy-io/react-auth"
 import { batchCommitment, nuggetBatchEscrowAbi } from "@/lib/escrow"
+import { payoutWindowId } from "@/lib/cycle"
 import { base64ToBytes, encryptForCre } from "@/lib/crypto"
 
 const WALLET_KEY = "nugget.rewardWallet.address.v1"
 const WALLET_BATCH_KEY = "nugget.rewardWallet.batchId.v1"
-const MIN_CONTRIBUTIONS = 1
+const MIN_CONTRIBUTIONS = 2
 const escrowAddress = process.env.NEXT_PUBLIC_NUGGET_BATCH_ESCROW_ADDRESS ?? ""
 
 type ContributorRewardWalletProps = {
@@ -26,12 +27,24 @@ export function ContributorRewardWallet({ contributionCount, rewardBatchId, late
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [batchId, setBatchId] = useState<string | null>(null)
+  const [claimBatchIds, setClaimBatchIds] = useState<string[]>([])
   const [claiming, setClaiming] = useState(false)
 
   useEffect(() => {
     setAddress(localStorage.getItem(WALLET_KEY))
     setBatchId(localStorage.getItem(WALLET_BATCH_KEY) ?? rewardBatchId)
   }, [rewardBatchId])
+
+  useEffect(() => {
+    if (!address) return
+    fetch(`/api/rewards/claimable?walletAddress=${encodeURIComponent(address)}`, { cache: "no-store" })
+      .then(async (response) => {
+        if (!response.ok) return
+        const result = (await response.json()) as { batchIds?: string[] }
+        setClaimBatchIds(result.batchIds ?? [])
+      })
+      .catch(() => undefined)
+  }, [address])
 
   const createWallet = async () => {
     setCreating(true)
@@ -48,10 +61,13 @@ export function ContributorRewardWallet({ contributionCount, rewardBatchId, late
         JSON.stringify({ claimId: latestClaimId, walletAddress: wallet.address }),
         base64ToBytes(keyData.publicKey),
       )
+      const registrationBatchId = rewardBatchId && /^\d{4}-P\d{2}$/.test(rewardBatchId)
+        ? rewardBatchId
+        : payoutWindowId()
       const response = await fetch("/api/rewards/opt-in", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ walletAddress: wallet.address, claimId: latestClaimId, batchId: rewardBatchId, registration }),
+        body: JSON.stringify({ walletAddress: wallet.address, claimId: latestClaimId, batchId: registrationBatchId, registration }),
       })
       const responseText = await response.text()
       let result: { ok?: boolean; error?: string; batchId?: string } = {}
@@ -79,7 +95,7 @@ export function ContributorRewardWallet({ contributionCount, rewardBatchId, late
   const eligible = contributionCount >= MIN_CONTRIBUTIONS
 
   const claimReward = async () => {
-    if (!address || !batchId) return
+    if (!address || (!batchId && claimBatchIds.length === 0)) return
     if (!/^0x[a-fA-F0-9]{40}$/.test(escrowAddress)) {
       setError("Reward escrow is not configured yet.")
       return
@@ -87,7 +103,8 @@ export function ContributorRewardWallet({ contributionCount, rewardBatchId, late
     setClaiming(true)
     setError(null)
     try {
-      const response = await fetch(`/api/rewards/claim-proof?batchId=${encodeURIComponent(batchId)}&walletAddress=${encodeURIComponent(address)}`)
+      const purchaseId = claimBatchIds[0] ?? batchId!
+      const response = await fetch(`/api/rewards/claim-proof?batchId=${encodeURIComponent(purchaseId)}&walletAddress=${encodeURIComponent(address)}`)
       const result = (await response.json()) as { ok?: boolean; proof?: `0x${string}`[]; error?: string }
       if (!response.ok || !result.ok || !result.proof) throw new Error(result.error ?? "Reward is not ready to claim")
       await sendTransaction({
@@ -96,9 +113,10 @@ export function ContributorRewardWallet({ contributionCount, rewardBatchId, late
         data: encodeFunctionData({
           abi: nuggetBatchEscrowAbi,
           functionName: "claim",
-          args: [batchCommitment(batchId), result.proof],
+          args: [batchCommitment(purchaseId), result.proof],
         }),
       })
+      setClaimBatchIds((current) => current.filter((candidate) => candidate !== purchaseId))
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Reward claim failed")
     } finally {
@@ -110,17 +128,17 @@ export function ContributorRewardWallet({ contributionCount, rewardBatchId, late
     <section className="reward-wallet" aria-labelledby="contributor-reward-wallet-heading">
       <h3 id="contributor-reward-wallet-heading">Contributor rewards</h3>
       <p className="lede">
-        Register a separate reward wallet after your first anonymous contribution. It is eligible only for the current 14-day payout window; future contributions stay opted in until you opt out.
+        Register a separate reward wallet after two anonymous contributions. It is eligible for the current 14-day payout window; future contributions stay opted in until you opt out.
       </p>
       {address ? (
         <>
           <p className="muted">
             Reward wallet ready: {address}
-            {batchId && <> · registered for batch {batchId}</>}
+            {batchId && <> · eligible in payout window {batchId}</>}
           </p>
-          {batchId && /^0x[a-fA-F0-9]{40}$/.test(escrowAddress) && (
+          {claimBatchIds.length > 0 && /^0x[a-fA-F0-9]{40}$/.test(escrowAddress) && (
             <button type="button" className="btn accent" onClick={claimReward} disabled={claiming || !ready}>
-              {claiming ? "Claiming reward…" : "Claim reward when batch settles"}
+              {claiming ? "Claiming reward…" : `Claim reward (${claimBatchIds.length} available)`}
             </button>
           )}
         </>

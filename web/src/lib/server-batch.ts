@@ -3,6 +3,9 @@ import fs from "fs"
 import path from "path"
 import type { CreEncryptedContribution } from "./crypto"
 import type { EncryptedContributionBatch } from "./types"
+import { createPublicClient, http } from "viem"
+import { sepolia } from "viem/chains"
+import { batchCommitment, escrowAddress, nuggetBatchEscrowAbi } from "./escrow"
 
 /**
  * Resolve ONE shared pool directory no matter which port / cwd Next uses.
@@ -469,6 +472,50 @@ export async function loadRewardClaimProof(batchId: string, walletAddress: strin
   }
 }
 
+export async function listRewardClaimBatches(walletAddress: string): Promise<string[]> {
+  const normalizedWallet = walletAddress.toLowerCase()
+  if (hostedStorageConfigured) {
+    const rows = await supabaseRequest<Array<{ batch_id: string }>>(
+      `nugget_reward_claim_proofs?select=batch_id&wallet_address=eq.${encodeURIComponent(normalizedWallet)}&order=created_at.desc`,
+    )
+    const batches = [...new Set(rows.map((row) => row.batch_id))]
+    return filterUnclaimedBatches(batches, normalizedWallet)
+  }
+  const files = await fs.promises.readdir(dataDir).catch(() => [])
+  const batches: string[] = []
+  for (const name of files.filter((entry) => entry.startsWith("reward-proofs-") && entry.endsWith(".json"))) {
+    try {
+      const rows = JSON.parse(await readFile(path.join(dataDir, name), "utf8")) as RewardClaimProof[]
+      if (rows.some((row) => row.walletAddress.toLowerCase() === normalizedWallet)) {
+        batches.push(name.slice("reward-proofs-".length, -".json".length))
+      }
+    } catch {
+      // Ignore an incomplete proof file while another simulation is writing it.
+    }
+  }
+  return filterUnclaimedBatches(batches.sort().reverse(), normalizedWallet)
+}
+
+async function filterUnclaimedBatches(batchIds: string[], walletAddress: string): Promise<string[]> {
+  const contract = escrowAddress()
+  if (!contract || batchIds.length === 0) return batchIds
+  const client = createPublicClient({
+    chain: sepolia,
+    transport: http(process.env.SEPOLIA_RPC_URL || "https://ethereum-sepolia-rpc.publicnode.com"),
+  })
+  const unclaimed: string[] = []
+  for (const batchId of batchIds) {
+    const claimed = await client.readContract({
+      address: contract,
+      abi: nuggetBatchEscrowAbi,
+      functionName: "claimed",
+      args: [batchCommitment(batchId), walletAddress as `0x${string}`],
+    })
+    if (!claimed) unclaimed.push(batchId)
+  }
+  return unclaimed
+}
+
 export async function markRewardAllocationPaid(
   allocation: RewardAllocation,
   transactionHash: string,
@@ -502,6 +549,7 @@ export async function accountRewards(
   batchId: string,
   contributorCount: number,
   rewardPoolWei: string,
+  eligibilityBatchId = batchId,
 ): Promise<RewardAccounting> {
   const payoutKMin = Number(process.env.PAYOUT_K_MIN || "2")
   if (!Number.isSafeInteger(payoutKMin) || payoutKMin < 2) {
@@ -511,7 +559,7 @@ export async function accountRewards(
   let wallets: string[]
   if (hostedStorageConfigured) {
     const rows = await supabaseRequest<Array<{ wallet_address: string }>>(
-      `nugget_reward_opt_ins?select=wallet_address&batch_id=eq.${encodeURIComponent(batchId)}&status=eq.eligible`,
+      `nugget_reward_opt_ins?select=wallet_address&batch_id=eq.${encodeURIComponent(eligibilityBatchId)}&status=eq.eligible`,
     )
     wallets = [...new Set(rows.map((row) => row.wallet_address.toLowerCase()))]
   } else {
@@ -520,7 +568,7 @@ export async function accountRewards(
       const entries = JSON.parse(raw) as RewardOptIn[]
       wallets = [...new Set(
         entries
-          .filter((entry) => entry.batchId === batchId && entry.status === "eligible")
+          .filter((entry) => entry.batchId === eligibilityBatchId && entry.status === "eligible")
           .map((entry) => entry.walletAddress.toLowerCase()),
       )]
     } catch {

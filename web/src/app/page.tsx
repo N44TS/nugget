@@ -28,9 +28,9 @@ export default function Home() {
           </aside>
         </header>
         <nav className="journey" aria-label="Your Nugget journey">
-          <span><b>1</b> Set your profile</span>
-          <span><b>2</b> Log privately</span>
-          <span><b>3</b> Contribute, if you want</span>
+          <span><b>1</b> Log privately</span>
+          <span><b>2</b> Contribute to research</span>
+          <span><b>3</b> Get rewarded</span>
         </nav>
         <TrackerApp showRewards={Boolean(privyAppId)} />
         <p className="foot">

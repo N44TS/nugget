@@ -3,13 +3,20 @@
 import Link from "next/link"
 import { usePrivy, useSendTransaction } from "@privy-io/react-auth"
 import { useState, useTransition } from "react"
-import { encodeFunctionData } from "viem"
+import { encodeFunctionData, formatEther } from "viem"
 import { payoutWindowId } from "@/lib/cycle"
-import { batchCommitment, nuggetBatchEscrowAbi } from "@/lib/escrow"
+import { batchCommitment, nuggetBatchEscrowAbi, purchaseBatchId } from "@/lib/escrow"
 
 const paymentTreasury = process.env.NEXT_PUBLIC_BUYER_PAYMENT_TREASURY ?? ""
 const escrowAddress = process.env.NEXT_PUBLIC_NUGGET_BATCH_ESCROW_ADDRESS ?? ""
 const paymentWei = process.env.NEXT_PUBLIC_BUYER_PAYMENT_WEI ?? "1000000000000000"
+const paymentEth = (() => {
+  try {
+    return formatEther(BigInt(paymentWei))
+  } catch {
+    return "configured amount"
+  }
+})()
 
 type RunCreResponse = {
   ok?: boolean
@@ -83,7 +90,8 @@ export function BuyerApp() {
           )
           return
         }
-        let batchId = payoutWindowId()
+        const payoutWindow = payoutWindowId()
+        let batchId = payoutWindow
         if (usesEscrow) {
           const poolResponse = await fetch("/api/pool/verify", { cache: "no-store" })
           const poolData = (await poolResponse.json()) as { pool?: { batchId?: string }; error?: string }
@@ -93,7 +101,8 @@ export function BuyerApp() {
           }
           batchId = poolData.pool.batchId
         }
-        setStatus(usesEscrow ? "Fund this confidential research batch in your Privy wallet…" : "Approve the Sepolia report fee in your Privy wallet…")
+        setStatus(usesEscrow ? "Fund this confidential research purchase in your Privy wallet…" : "Approve the Sepolia report fee in your Privy wallet…")
+        const purchaseId = purchaseBatchId(payoutWindow, crypto.randomUUID())
         const payment = await sendTransaction({
           to: (usesEscrow ? escrowAddress : paymentTreasury) as `0x${string}`,
           value: paymentWei,
@@ -103,7 +112,7 @@ export function BuyerApp() {
                 data: encodeFunctionData({
                   abi: nuggetBatchEscrowAbi,
                   functionName: "fundBatch",
-                  args: [batchCommitment(batchId)],
+                  args: [batchCommitment(purchaseId)],
                 }),
               }
             : {}),
@@ -112,7 +121,7 @@ export function BuyerApp() {
         const res = await fetch("/api/buyer/run-cre", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ paymentTxHash: payment.hash }),
+          body: JSON.stringify({ paymentTxHash: payment.hash, payoutWindowId: payoutWindow, purchaseId }),
         })
         const data = (await res.json()) as RunCreResponse
         if (!res.ok || !data.ok) {
@@ -155,6 +164,11 @@ export function BuyerApp() {
 
       <section className="panel">
         <h2>How to use (real data only)</h2>
+        <div className="buyer-price" aria-label={`Report price ${paymentEth} Sepolia ETH`}>
+          <span className="eyebrow">Buyer report price</span>
+          <strong>{paymentEth} ETH</strong>
+          <span>Paid on Sepolia. The current encrypted pool is aggregated privately by CRE.</span>
+        </div>
         <p className="lede">
           1. Start two servers: <code>bun dev --port 3000</code> and <code>bun dev --port 3001</code>
           <br />
@@ -166,7 +180,7 @@ export function BuyerApp() {
         </p>
         {authenticated && wallet && (
           <p className="muted">
-            Fund this embedded wallet with Sepolia ETH before paying:
+            Fund this embedded wallet with Sepolia ETH for the report value before paying:
             {" "}
             <a href="https://sepoliafaucet.com/" target="_blank" rel="noreferrer">
               Open Sepolia faucet

@@ -23590,7 +23590,8 @@ var configSchema = objectType({
   secretId: stringType(),
   kMin: numberType().int().positive(),
   rewardWindowId: stringType().optional(),
-  reportSince: stringType().optional()
+  reportSince: stringType().optional(),
+  emitClaimProofs: booleanType().optional()
 });
 var isEncryptedBatch = (raw) => {
   if (!raw || typeof raw !== "object")
@@ -23669,6 +23670,9 @@ var onCronTrigger = (runtime) => {
   const summary = formatPublicSummary(report);
   const simulationSummary = report.kAnonOk ? `OK batch=${report.epoch} n=${report.contributorCount} kAnon=passed rejected=${report.rejectedCount} rewardRoot=${report.rewardMerkleRoot ?? "none"} eligibleWallets=${report.eligibleWalletCount}` : `SUPPRESSED batch=${report.epoch} n=${report.contributorCount} kMin=${report.kMin}`;
   runtime.log(`Enclave aggregation complete. ${simulationSummary}`);
+  if (config.emitClaimProofs) {
+    runtime.log(`NUGGET_CLAIM_PROOFS=${JSON.stringify(report.rewardProofs)}`);
+  }
   const donRuntime = runtime.usingTheDons();
   const encodedPayload = encodeAbiParameters(parseAbiParameters("string epoch, uint256 contributorCount, bool kAnonOk, string summary"), [report.epoch, BigInt(report.contributorCount), report.kAnonOk, summary]);
   donRuntime.report({

@@ -29,6 +29,8 @@ export const configSchema = z.object({
 	rewardWindowId: z.string().optional(),
 	/** UTC cut-off for the buyer's rolling report (normally six months). */
 	reportSince: z.string().optional(),
+	/** Server-only proof handoff for the buyer-triggered simulation. */
+	emitClaimProofs: z.boolean().optional(),
 })
 type Config = z.infer<typeof configSchema>
 
@@ -159,6 +161,9 @@ export const onCronTrigger = (runtime: TeeRuntime<Config>): string => {
 
 	// Simulation-only log — no raw rows, no secret
 	runtime.log(`Enclave aggregation complete. ${simulationSummary}`)
+	if (config.emitClaimProofs) {
+		runtime.log(`NUGGET_CLAIM_PROOFS=${JSON.stringify(report.rewardProofs)}`)
+	}
 
 	// Step 4: only public aggregate fields cross to the DON
 	const donRuntime = runtime.usingTheDons()

@@ -13,7 +13,7 @@ import {
 } from "@/lib/server-batch"
 import { payRewards, settleEscrowBatch } from "@/lib/treasury"
 import { decodeFunctionData } from "viem"
-import { batchCommitment, escrowAddress, nuggetBatchEscrowAbi } from "@/lib/escrow"
+import { batchCommitment, escrowAddress, nuggetBatchEscrowAbi, purchaseBatchId } from "@/lib/escrow"
 import { payoutWindowId } from "@/lib/cycle"
 import { aggregateContributions, formatPublicSummary, isValidContribution } from "@/lib/aggregate"
 import { base64ToBytes, type CreEncryptedContribution } from "@/lib/crypto"
@@ -138,6 +138,7 @@ async function runCreSimulate(poolFetchUrl: string, rewardWindowId: string) {
   config.url = poolFetchUrl
   config.kMin = K_MIN
   config.rewardWindowId = rewardWindowId
+  config.emitClaimProofs = true
   const sixMonthsAgo = new Date()
   sixMonthsAgo.setUTCMonth(sixMonthsAgo.getUTCMonth() - 6)
   config.reportSince = sixMonthsAgo.toISOString()
@@ -172,15 +173,22 @@ async function runCreSimulate(poolFetchUrl: string, rewardWindowId: string) {
           },
         )
         let out = ""
+        const logChunk = (prefix: string, chunk: string, write: (message: string) => void) => {
+          const safeChunk = chunk
+            .split(/(?<=\n)/)
+            .filter((line) => !line.includes("NUGGET_CLAIM_PROOFS="))
+            .join("")
+          if (safeChunk.trim()) write(`${prefix} ${safeChunk.trimEnd()}`)
+        }
         child.stdout.on("data", (d: Buffer) => {
           const chunk = d.toString()
           out += chunk
-          console.log("[cre stdout]", chunk.trimEnd())
+          logChunk("[cre stdout]", chunk, console.log)
         })
         child.stderr.on("data", (d: Buffer) => {
           const chunk = d.toString()
           out += chunk
-          console.error("[cre stderr]", chunk.trimEnd())
+          logChunk("[cre stderr]", chunk, console.error)
         })
         const timeout = setTimeout(() => {
           console.error("[cre] simulation timed out")
@@ -307,7 +315,11 @@ export async function POST(request: Request) {
   isRunning = true
 
   try {
-    const body = (await request.json().catch(() => ({}))) as { paymentTxHash?: string }
+    const body = (await request.json().catch(() => ({}))) as {
+      paymentTxHash?: string
+      payoutWindowId?: string
+      purchaseId?: string
+    }
     if (!body.paymentTxHash) {
       return NextResponse.json({ ok: false, error: "A confirmed buyer payment is required" }, { status: 402 })
     }
@@ -337,13 +349,17 @@ export async function POST(request: Request) {
           note: "This payment already unlocked this report; the stored result was returned.",
         })
       }
-      const verified = await verifyPayment(body.paymentTxHash, payoutWindowId())
+      const currentPayoutWindow = payoutWindowId()
+      if (body.payoutWindowId !== currentPayoutWindow || !body.purchaseId?.startsWith(`${currentPayoutWindow}:`)) {
+        throw new Error("This purchase was prepared for a different payout window")
+      }
+      const verified = await verifyPayment(body.paymentTxHash, body.purchaseId)
       const now = new Date().toISOString()
       await saveBuyerPayment({
         txHash: body.paymentTxHash,
         buyerAddress: verified.buyerAddress,
         amountWei: verified.amountWei,
-        batchId: null,
+        batchId: body.purchaseId,
         status: "verified",
         reportSummary: null,
         createdAt: now,
@@ -370,7 +386,8 @@ export async function POST(request: Request) {
       storage: poolDataDir(),
     })
 
-    const rewardWindowId = payoutWindowId()
+    const rewardWindowId = body.payoutWindowId || payoutWindowId()
+    const purchaseId = body.purchaseId || purchaseBatchId(rewardWindowId, body.paymentTxHash)
     let cre: CreRun
     try {
       cre = await runConfiguredCreSimulation(pool, poolFetchUrl, rewardWindowId)
@@ -411,7 +428,7 @@ export async function POST(request: Request) {
     if (existingPayment) {
       await saveBuyerPayment({
         ...existingPayment,
-        batchId: rewardWindowId,
+        batchId: purchaseId,
         status: "completed",
         reportSummary: cre.summary,
         updatedAt: completedAt,
@@ -430,10 +447,10 @@ export async function POST(request: Request) {
       }
     }
     if (creRewardRoot && Object.keys(teeProofs).length === creEligibleWalletCount) {
-      await saveRewardClaimProofs(rewardWindowId, teeProofs)
+      await saveRewardClaimProofs(purchaseId, teeProofs)
     }
     const rewardAccounting = existingPayment && !escrowAddress()
-      ? await accountRewards(rewardWindowId, pool.contributions.length, existingPayment.amountWei)
+      ? await accountRewards(purchaseId, pool.contributions.length, existingPayment.amountWei, rewardWindowId)
       : null
     let payout: Awaited<ReturnType<typeof payRewards>> | null = null
     let escrowSettlement: { txHash: string } | null = null
@@ -449,7 +466,7 @@ export async function POST(request: Request) {
           if (!creRewardRoot || creEligibleWalletCount === 0) {
             throw new Error("CRE found no eligible reward wallets for this batch")
           }
-          escrowSettlement = await settleEscrowBatch(rewardWindowId, creRewardRoot, creEligibleWalletCount)
+          escrowSettlement = await settleEscrowBatch(purchaseId, creRewardRoot, creEligibleWalletCount)
         } catch (error) {
           console.error("[escrow] settlement failed", { batchId: pool.epoch, error })
           payout = {
@@ -461,7 +478,7 @@ export async function POST(request: Request) {
         }
       } else {
         try {
-          payout = await payRewards(rewardWindowId)
+          payout = await payRewards(purchaseId)
         } catch (error) {
           console.error("[rewards] settlement failed", { batchId: pool.epoch, error })
           payout = {
