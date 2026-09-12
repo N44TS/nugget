@@ -94,16 +94,16 @@ export function BuyerApp() {
           return
         }
         const payoutWindow = payoutWindowId()
-        let batchId = payoutWindow
-        if (usesEscrow) {
-          const poolResponse = await fetch("/api/pool/verify", { cache: "no-store" })
-          const poolData = (await poolResponse.json()) as { pool?: { batchId?: string }; error?: string }
-          if (!poolResponse.ok || !poolData.pool?.batchId) {
-            setError(poolData.error ?? "The contribution pool is empty. Wait for contributors before funding a batch.")
-            return
-          }
-          batchId = poolData.pool.batchId
-        }
+        // let batchId = payoutWindow
+        // if (usesEscrow) {
+        //   const poolResponse = await fetch("/api/pool/verify", { cache: "no-store" })
+        //   const poolData = (await poolResponse.json()) as { pool?: { batchId?: string }; error?: string }
+        //   if (!poolResponse.ok || !poolData.pool?.batchId) {
+        //     setError(poolData.error ?? "The contribution pool is empty. Wait for contributors before funding a batch.")
+        //     return
+        //   }
+        //   batchId = poolData.pool.batchId
+       // }
         setStatus(usesEscrow ? "Fund this confidential research purchase in your Privy wallet…" : "Approve the Sepolia report fee in your Privy wallet…")
         const purchaseId = purchaseBatchId(payoutWindow, crypto.randomUUID())
         const payment = await sendTransaction({
