@@ -36,6 +36,9 @@ type RunCreResponse = {
     avgCycleByAgeBand: Record<string, number> | null
     rejectedCount: number
     kMin: number
+    kAnonOk?: boolean
+    rewardRoot?: string | null
+    eligibleWallets?: number
   } | null
   poolSize?: number
   claimIds?: string[]
@@ -264,8 +267,50 @@ export function BuyerApp() {
       )}
 
       {result?.creSummary && (
+        result.report && (
+          <section className="panel research-report">
+            <p className="step-label">RESEARCH BRIEF</p>
+            <h2>Nugget cohort report</h2>
+            <p className="lede">
+              A descriptive aggregate of the current rolling research pool. Individual records are not included in this report.
+            </p>
+            <div className="report-meta">
+              <span>Scope <strong>{result.report.batchId}</strong></span>
+              <span>Privacy threshold <strong>k = {result.report.kMin}</strong></span>
+              <span>Quality checks <strong>{result.report.rejectedCount} excluded</strong></span>
+            </div>
+            <div className="report-grid">
+              <div className="report-stat"><strong>{result.report.contributorCount}</strong><span>valid contributors</span></div>
+              <div className="report-stat"><strong>{result.report.eligibleWallets ?? 0}</strong><span>eligible reward wallets</span></div>
+              <div className="report-stat"><strong>{result.report.kAnonOk ? "Passed" : "Suppressed"}</strong><span>k-anonymity</span></div>
+            </div>
+            <div className="report-section">
+              <h3>What this report says</h3>
+              <ul className="report-findings">
+                <li>Average cycle length: <strong>{result.report.avgCycleLength ?? "suppressed"} days</strong></li>
+                <li>Average period length: <strong>{result.report.avgPeriodLength ?? "suppressed"} days</strong></li>
+                <li>Symptoms reported by at least k contributors: <strong>{Object.entries(result.report.symptomRates ?? {}).map(([key, value]) => `${key} ${Math.round(value * 100)}%`).join(", ") || "none disclosed"}</strong></li>
+              </ul>
+            </div>
+            <div className="report-section">
+              <h3>Cohort composition</h3>
+              <ul className="report-findings">
+                <li>Age-band share: <strong>{Object.entries(result.report.ageBandShare ?? {}).map(([key, value]) => `${key} ${Math.round(value * 100)}%`).join(", ") || "suppressed"}</strong></li>
+                <li>Average cycle by age band: <strong>{Object.entries(result.report.avgCycleByAgeBand ?? {}).map(([key, value]) => `${key} ${value} days`).join(", ") || "suppressed"}</strong></li>
+              </ul>
+            </div>
+            <div className="report-section">
+              <h3>Research limitations</h3>
+              <p className="muted">These are descriptive, k-anonymous aggregates from a rolling pool, not individual-level data or clinical advice. Some categories are withheld when the privacy threshold is not met.</p>
+            </div>
+          </section>
+        )
+      )}
+
+      {result?.creSummary && (
         <section className="panel">
           <h2>CRE output</h2>
+          <p className="muted">Technical output from the official confidential workflow simulation.</p>
           <pre className="cre-out">{result.creSummary}</pre>
           {result.note && <p className="muted">{result.note}</p>}
           {result.dataDir && <p className="muted">Shared pool dir: {result.dataDir}</p>}

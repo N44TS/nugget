@@ -28,6 +28,65 @@ let isRunning = false
 const SEPOLIA_CHAIN_ID = "0xaa36a7"
 type CreRun = { ok: boolean; summary: string | null; log: string; error?: string }
 
+type PublicReport = {
+  batchId: string
+  contributorCount: number
+  avgCycleLength: number | null
+  avgPeriodLength: number | null
+  symptomRates: Record<string, number> | null
+  ageBandShare: Record<string, number> | null
+  avgCycleByAgeBand: Record<string, number> | null
+  rejectedCount: number
+  kMin: number
+  kAnonOk: boolean
+  rewardRoot: string | null
+  eligibleWallets: number
+}
+
+function parsePublicReport(summary: string): PublicReport | null {
+  const suppressed = summary.match(/^SUPPRESSED batch=(\S+) n=(\d+) kMin=(\d+)/)
+  if (suppressed) {
+    return {
+      batchId: suppressed[1]!,
+      contributorCount: Number(suppressed[2]),
+      avgCycleLength: null,
+      avgPeriodLength: null,
+      symptomRates: null,
+      ageBandShare: null,
+      avgCycleByAgeBand: null,
+      rejectedCount: 0,
+      kMin: Number(suppressed[3]),
+      kAnonOk: false,
+      rewardRoot: null,
+      eligibleWallets: 0,
+    }
+  }
+  const match = summary.match(
+    /^OK batch=(\S+) n=(\d+) avgCycle=([\d.]+) avgPeriod=([\d.]+) symptoms=\{([^}]*)\} ageShare=\{([^}]*)\} avgCycleByAge=\{([^}]*)\} kAnon=passed rejected=(\d+) rewardRoot=(\S+) eligibleWallets=(\d+)/,
+  )
+  if (!match) return null
+  return {
+    batchId: match[1]!,
+    contributorCount: Number(match[2]),
+    avgCycleLength: Number(match[3]),
+    avgPeriodLength: Number(match[4]),
+    symptomRates: parseReportMap(match[5]),
+    ageBandShare: parseReportMap(match[6]),
+    avgCycleByAgeBand: parseReportMap(match[7]),
+    rejectedCount: Number(match[8]),
+    kMin: K_MIN,
+    kAnonOk: true,
+    rewardRoot: match[9] === "none" ? null : match[9]!,
+    eligibleWallets: Number(match[10]),
+  }
+}
+
+function parseReportMap(value: string): Record<string, number> | null {
+  const entries = value.split(",").filter(Boolean).map((entry) => entry.split(":"))
+  if (entries.length === 0) return null
+  return Object.fromEntries(entries.map(([key, number]) => [key, Number(number)]))
+}
+
 async function verifyPayment(txHash: string, expectedBatchId?: string) {
   const treasury = (
     process.env.BUYER_PAYMENT_TREASURY ||
@@ -437,6 +496,7 @@ export async function POST(request: Request) {
     const rewardMatch = cre.summary.match(/rewardRoot=(0x[a-fA-F0-9]{64})\s+eligibleWallets=(\d+)/)
     const creRewardRoot = rewardMatch?.[1] as `0x${string}` | undefined
     const creEligibleWalletCount = rewardMatch ? Number(rewardMatch[2]) : 0
+    const publicReport = parsePublicReport(cre.summary)
     const proofMatch = cre.log.match(/NUGGET_CLAIM_PROOFS=(\{[^\n\r]*\})/)
     let teeProofs: Record<string, `0x${string}`[]> = {}
     if (proofMatch?.[1]) {
@@ -527,7 +587,7 @@ export async function POST(request: Request) {
         txHash: escrowSettlement.txHash,
         explorerUrl: `https://sepolia.etherscan.io/tx/${escrowSettlement.txHash}`,
       },
-      report: null,
+      report: publicReport,
       note: process.env.NUGGET_LOCAL_CRE_SIMULATION === "true"
         ? "Local CRE simulation: it executes the same encrypted-data, eligibility, Merkle-root, and claim-proof logic, but it is not a Chainlink TEE or DON."
         : "CRE simulation: fetch ciphertext → decrypt in handlerInTee → aggregate → public stats only.",

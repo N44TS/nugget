@@ -23668,7 +23668,7 @@ var onCronTrigger = (runtime) => {
   const unlocked = unlockContributionBatch(body, encryptionPrivateKey);
   const report = aggregateContributions(unlocked.batch, config.kMin, unlocked.rewardRegistrations, config.rewardWindowId, config.reportSince);
   const summary = formatPublicSummary(report);
-  const simulationSummary = report.kAnonOk ? `OK batch=${report.epoch} n=${report.contributorCount} kAnon=passed rejected=${report.rejectedCount} rewardRoot=${report.rewardMerkleRoot ?? "none"} eligibleWallets=${report.eligibleWalletCount}` : `SUPPRESSED batch=${report.epoch} n=${report.contributorCount} kMin=${report.kMin}`;
+  const simulationSummary = report.kAnonOk ? `OK batch=${report.epoch} n=${report.contributorCount} avgCycle=${report.avgCycleLength} avgPeriod=${report.avgPeriodLength} symptoms={${Object.entries(report.symptomRates ?? {}).sort(([a], [b]) => a.localeCompare(b)).map(([key, value]) => `${key}:${value}`).join(",")}} ageShare={${Object.entries(report.ageBandShare ?? {}).sort(([a], [b]) => a.localeCompare(b)).map(([key, value]) => `${key}:${value}`).join(",")}} avgCycleByAge={${Object.entries(report.avgCycleByAgeBand ?? {}).sort(([a], [b]) => a.localeCompare(b)).map(([key, value]) => `${key}:${value}`).join(",")}} kAnon=passed rejected=${report.rejectedCount} rewardRoot=${report.rewardMerkleRoot ?? "none"} eligibleWallets=${report.eligibleWalletCount}` : `SUPPRESSED batch=${report.epoch} n=${report.contributorCount} kMin=${report.kMin}`;
   runtime.log(`Enclave aggregation complete. ${simulationSummary}`);
   if (config.emitClaimProofs) {
     runtime.log(`NUGGET_CLAIM_PROOFS=${JSON.stringify(report.rewardProofs)}`);
