@@ -24,6 +24,7 @@ export function WalletCenter({
   const [amount, setAmount] = useState("")
   const [loading, setLoading] = useState(false)
   const [sending, setSending] = useState(false)
+  const [optionsOpen, setOptionsOpen] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -84,36 +85,56 @@ export function WalletCenter({
   }
 
   return (
-    <section className="panel" aria-labelledby={`${title.toLowerCase().replace(/\s+/g, "-")}-heading`}>
-      <h2 id={`${title.toLowerCase().replace(/\s+/g, "-")}-heading`}>{title}</h2>
-      <p className="muted">Sepolia wallet: {address}</p>
-      <p className="wallet-balance">
-        <strong>{loading ? "Loading…" : balanceWei === null ? "Balance unavailable" : `${formatEther(balanceWei)} ETH`}</strong>
-        <button type="button" className="btn secondary" onClick={() => void refreshBalance()} disabled={loading}>
+    <section className="wallet-center" aria-labelledby={`${title.toLowerCase().replace(/\s+/g, "-")}-heading`}>
+      <div className="wallet-heading">
+        <div>
+          <h4 id={`${title.toLowerCase().replace(/\s+/g, "-")}-heading`}>{title}</h4>
+          <p className="wallet-address">{address}</p>
+        </div>
+        <div className="wallet-balance">
+          <span className="wallet-label">Sepolia balance</span>
+          <strong>{loading ? "Loading…" : balanceWei === null ? "Unavailable" : `${formatEther(balanceWei)} ETH`}</strong>
+        </div>
+      </div>
+      <div className="wallet-toolbar">
+        <button type="button" className="wallet-link" onClick={() => void refreshBalance()} disabled={loading}>
           Refresh balance
         </button>
-      </p>
-      <div className="fields">
-        <label>
-          Send to
-          <input value={recipient} onChange={(event) => setRecipient(event.target.value)} placeholder="0x…" inputMode="text" />
-        </label>
-        <label>
-          Amount (ETH)
-          <input value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="0.0001" inputMode="decimal" />
-        </label>
-      </div>
-      <div className="wallet-actions">
-        <button type="button" className="btn primary" onClick={() => void send()} disabled={sending || loading}>
-          {sending ? "Sending…" : "Send Sepolia ETH"}
+        <button
+          type="button"
+          className="wallet-link"
+          aria-expanded={optionsOpen}
+          aria-controls={`${title.toLowerCase().replace(/\s+/g, "-")}-options`}
+          onClick={() => setOptionsOpen((open) => !open)}
+        >
+          {optionsOpen ? "Close wallet options" : "Open wallet options"}
         </button>
-        {allowExport && (
-          <button type="button" className="btn secondary" onClick={() => void exportWallet({ address })}>
-            Export wallet with Privy
-          </button>
-        )}
       </div>
-      <p className="muted">Crypto stays behind Privy login and confirmation screens. Never share a private key in chat or support messages.</p>
+      {optionsOpen && (
+        <div className="wallet-options" id={`${title.toLowerCase().replace(/\s+/g, "-")}-options`}>
+          <div className="wallet-fields">
+            <label>
+              Send to
+              <input value={recipient} onChange={(event) => setRecipient(event.target.value)} placeholder="0x…" inputMode="text" />
+            </label>
+            <label>
+              Amount (ETH)
+              <input value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="0.0001" inputMode="decimal" />
+            </label>
+          </div>
+          <div className="wallet-actions">
+            <button type="button" className="btn primary" onClick={() => void send()} disabled={sending || loading}>
+              {sending ? "Sending…" : "Send Sepolia ETH"}
+            </button>
+            {allowExport && (
+              <button type="button" className="btn secondary" onClick={() => void exportWallet({ address })}>
+                Export wallet with Privy
+              </button>
+            )}
+          </div>
+          <p className="muted">Transfers and export stay behind Privy confirmation screens.</p>
+        </div>
+      )}
       {message && <p className="banner ok" role="status">{message}</p>}
       {error && <p className="banner err" role="alert">{error}</p>}
     </section>

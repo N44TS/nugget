@@ -268,6 +268,25 @@ export function TrackerApp({ showRewards = false }: { showRewards?: boolean }) {
         {saveStatus && <p className="inline-confirmation" role="status">{saveStatus}</p>}
       </section>
 
+        <section className="panel history-panel" aria-labelledby="history-heading">
+        <p className="step-label"> STORED ONLY ON THIS DEVICE</p>
+        <h2 id="history-heading">Your cycle history <span aria-hidden="true">💫</span></h2>
+        {sorted.length === 0 ? (
+          <p className="muted">No entries yet.</p>
+        ) : (
+          <ul className="history">
+            {sorted.map((e) => (
+              <li key={e.id}>
+                <span className="range">
+                  {e.periodStart} → {e.periodEnd}
+                </span>
+                <span className="syms">{e.symptoms.join(", ") || "no symptoms"}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
        <section className="panel step-panel log-panel" aria-labelledby="profile-heading">
         <p className="step-label">PROFILE</p>
         <h2 id="profile-heading">Choose an age band</h2>
@@ -338,24 +357,7 @@ export function TrackerApp({ showRewards = false }: { showRewards?: boolean }) {
         )}
       </section>
 
-      <section className="panel history-panel" aria-labelledby="history-heading">
-        <p className="step-label"> STORED ONLY ON THIS DEVICE</p>
-        <h2 id="history-heading">Your cycle history <span aria-hidden="true">💫</span></h2>
-        {sorted.length === 0 ? (
-          <p className="muted">No entries yet.</p>
-        ) : (
-          <ul className="history">
-            {sorted.map((e) => (
-              <li key={e.id}>
-                <span className="range">
-                  {e.periodStart} → {e.periodEnd}
-                </span>
-                <span className="syms">{e.symptoms.join(", ") || "no symptoms"}</span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
+
 
       {status && <p className="banner ok" role="status">{status}</p>}
       {poolSummary && <p className="banner ok" role="status">{poolSummary}</p>}

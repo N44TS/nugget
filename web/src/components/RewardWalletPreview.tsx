@@ -8,8 +8,8 @@ export function RewardWalletPreview() {
   const wallet = user?.linkedAccounts.find((account) => account.type === "wallet")
 
   return (
-    <section className="panel" aria-labelledby="reward-wallet-heading">
-      <h2 id="reward-wallet-heading">Buyer organization wallet</h2>
+    <section className="panel buyer-wallet-panel" aria-labelledby="reward-wallet-heading">
+      <h2 id="reward-wallet-heading">Your Buyer Wallet</h2>
       <p className="lede">
         Sign in as an organization buyer and Privy will create an embedded Ethereum wallet for you.
         Contributors do not need an account or wallet.

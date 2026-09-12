@@ -231,21 +231,11 @@ export function BuyerApp() {
       </p>
 
       <section className="panel">
-        <h2>How to use (real data only)</h2>
         <div className="buyer-price" aria-label={`Report price ${paymentEth} Sepolia ETH`}>
           <span className="eyebrow">Buyer report price</span>
           <strong>{paymentEth} ETH</strong>
           <span>Paid on Sepolia. The current encrypted pool is aggregated privately by CRE.</span>
         </div>
-        <p className="lede">
-          1. Start two servers: <code>bun dev --port 3000</code> and <code>bun dev --port 3001</code>
-          <br />
-          2. On each port, set age band, log a period, <strong>Opt in</strong> (they share one pool)
-          <br />
-          3. Open <code>/buyer</code> on either port → <strong>Run CRE aggregation</strong>
-          <br />
-          Do <strong>not</strong> run <code>bun run basic-flow</code> — that script invents test users.
-        </p>
         {authenticated && wallet && (
           <p className="muted">
             Fund this embedded wallet with Sepolia ETH for the report value before paying:
@@ -388,7 +378,7 @@ export function BuyerApp() {
 
       {result?.creSummary && (
         <section className="panel">
-          <h2>CRE output</h2>
+          <h2>CRE raw output</h2>
           <p className="muted">Technical output from the official confidential workflow simulation.</p>
           <pre className="cre-out">{result.creSummary}</pre>
           {result.note && <p className="muted">{result.note}</p>}
