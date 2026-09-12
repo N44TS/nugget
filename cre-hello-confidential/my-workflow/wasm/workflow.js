@@ -23652,6 +23652,7 @@ var unlockContributionBatch = (body, privateKeyBase64) => {
 };
 var onCronTrigger = (runtime) => {
   const config = runtime.config;
+  runtime.log(`DEBUG config=${JSON.stringify(config)}`);
   const encryptionPrivateKey = runtime.getSecret({ id: config.secretId }).result().value;
   const apiToken = "";
   const response = new cre.capabilities.HTTPClient().sendRequest(runtime, {
@@ -23671,7 +23672,9 @@ var onCronTrigger = (runtime) => {
   const simulationSummary = report.kAnonOk ? `OK batch=${report.epoch} n=${report.contributorCount} avgCycle=${report.avgCycleLength} avgPeriod=${report.avgPeriodLength} symptoms={${Object.entries(report.symptomRates ?? {}).sort(([a], [b]) => a.localeCompare(b)).map(([key, value]) => `${key}:${value}`).join(",")}} ageShare={${Object.entries(report.ageBandShare ?? {}).sort(([a], [b]) => a.localeCompare(b)).map(([key, value]) => `${key}:${value}`).join(",")}} avgCycleByAge={${Object.entries(report.avgCycleByAgeBand ?? {}).sort(([a], [b]) => a.localeCompare(b)).map(([key, value]) => `${key}:${value}`).join(",")}} kAnon=passed rejected=${report.rejectedCount} rewardRoot=${report.rewardMerkleRoot ?? "none"} eligibleWallets=${report.eligibleWalletCount}` : `SUPPRESSED batch=${report.epoch} n=${report.contributorCount} kMin=${report.kMin}`;
   runtime.log(`Enclave aggregation complete. ${simulationSummary}`);
   if (config.emitClaimProofs) {
-    runtime.log(`NUGGET_CLAIM_PROOFS=${JSON.stringify(report.rewardProofs)}`);
+    for (const [wallet, proof] of Object.entries(report.rewardProofs).sort(([a], [b]) => a.localeCompare(b))) {
+      runtime.log(`NUGGET_CLAIM_PROOF:${wallet}=${JSON.stringify(proof)}`);
+    }
   }
   const donRuntime = runtime.usingTheDons();
   const encodedPayload = encodeAbiParameters(parseAbiParameters("string epoch, uint256 contributorCount, bool kAnonOk, string summary"), [report.epoch, BigInt(report.contributorCount), report.kAnonOk, summary]);

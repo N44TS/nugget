@@ -17,7 +17,11 @@ services:
       cd ../../web &&
       bun install --frozen-lockfile &&
       bun run build
-    startCommand: $HOME/.bun/bin/bun --cwd web run start -- -H 0.0.0.0 -p $PORT
+    startCommand: >-
+      mkdir -p "$HOME/.cre" &&
+      cp /etc/secrets/cre.yaml "$HOME/.cre/cre.yaml" &&
+      cp /etc/secrets/context.yaml "$HOME/.cre/context.yaml" &&
+      $HOME/.bun/bin/bun --cwd web run start -- -H 0.0.0.0 -p $PORT
     healthCheckPath: /
     envVars:
       - key: SUPABASE_URL

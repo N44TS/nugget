@@ -232,10 +232,13 @@ async function runCreSimulate(poolFetchUrl: string, rewardWindowId: string) {
           },
         )
         let out = ""
+        // NOTE: real claim-proof lines are deliberately hidden from console
+        // output here (they're wallet-linked data), but the FULL text is
+        // still captured into `out` below and used for parsing later.
         const logChunk = (prefix: string, chunk: string, write: (message: string) => void) => {
           const safeChunk = chunk
             .split(/(?<=\n)/)
-            .filter((line) => !line.includes("NUGGET_CLAIM_PROOFS="))
+            .filter((line) => !line.includes("NUGGET_CLAIM_PROOF:"))
             .join("")
           if (safeChunk.trim()) write(`${prefix} ${safeChunk.trimEnd()}`)
         }
@@ -345,7 +348,12 @@ async function runLocalCreSimulation(
       eligibleWallets: uniqueWallets.length,
       hasRewardRoot: Boolean(tree?.root),
     })
-    return { ok: true, summary, log: `NUGGET_CLAIM_PROOFS=${JSON.stringify(proofs)}` }
+    // Match the same one-line-per-wallet format the real workflow now emits,
+    // so both paths are parsed identically below.
+    const proofLines = Object.entries(proofs)
+      .map(([wallet, proof]) => `NUGGET_CLAIM_PROOF:${wallet}=${JSON.stringify(proof)}`)
+      .join("\n")
+    return { ok: true, summary, log: proofLines }
   } catch (cause) {
     console.error("[cre local] simulation failed", cause)
     return { ok: false, summary: null, log: "", error: cause instanceof Error ? cause.message : "Local CRE simulation failed" }
@@ -497,17 +505,48 @@ export async function POST(request: Request) {
     const creRewardRoot = rewardMatch?.[1] as `0x${string}` | undefined
     const creEligibleWalletCount = rewardMatch ? Number(rewardMatch[2]) : 0
     const publicReport = parsePublicReport(cre.summary)
-    const proofMatch = cre.log.match(/NUGGET_CLAIM_PROOFS=(\{[^\n\r]*\})/)
-    let teeProofs: Record<string, `0x${string}`[]> = {}
-    if (proofMatch?.[1]) {
+
+    // Each eligible wallet's proof is emitted as its own log line
+    // (NUGGET_CLAIM_PROOF:<wallet>=<proofJson>) instead of one large JSON
+    // blob — the CRE TEE simulator appears to silently drop oversized
+    // single log lines, which was causing all proofs to go missing at once.
+    const teeProofs: Record<string, `0x${string}`[]> = {}
+    const legacyProofMatch = cre.log.match(/NUGGET_CLAIM_PROOFS=(\{[^\n\r]*\})/)
+    if (legacyProofMatch?.[1]) {
       try {
-        teeProofs = JSON.parse(proofMatch[1]) as Record<string, `0x${string}`[]>
+        const parsedProofs = JSON.parse(legacyProofMatch[1]) as Record<string, `0x${string}`[]>
+        for (const [wallet, proof] of Object.entries(parsedProofs)) {
+          if (/^0x[a-fA-F0-9]{40}$/.test(wallet) && Array.isArray(proof)) {
+            teeProofs[wallet.toLowerCase()] = proof
+          }
+        }
       } catch {
-        console.warn("[cre] claim proof package could not be parsed")
+        console.warn("[cre] legacy claim proof package could not be parsed")
       }
     }
-    if (creRewardRoot && Object.keys(teeProofs).length === creEligibleWalletCount) {
+    const proofLinePattern = /NUGGET_CLAIM_PROOF:(0x[a-fA-F0-9]{40})=(\[[^\n\r]*\])/g
+    for (const match of cre.log.matchAll(proofLinePattern)) {
+      const [, wallet, proofJson] = match
+      try {
+        teeProofs[wallet.toLowerCase()] = JSON.parse(proofJson) as `0x${string}`[]
+      } catch {
+        console.warn("[cre] a claim proof line could not be parsed", { wallet })
+      }
+    }
+    console.log("[cre] proof gate check", {
+      creRewardRoot,
+      creEligibleWalletCount,
+      teeProofKeys: Object.keys(teeProofs),
+      teeProofCount: Object.keys(teeProofs).length,
+      proofCountMatchesRoot: Object.keys(teeProofs).length === creEligibleWalletCount,
+    })
+    if (creRewardRoot && Object.keys(teeProofs).length === creEligibleWalletCount && creEligibleWalletCount > 0) {
       await saveRewardClaimProofs(purchaseId, teeProofs)
+    } else if (creRewardRoot && creEligibleWalletCount > 0) {
+      console.error("[cre] claim proofs were not persisted because the proof count did not match the CRE report", {
+        expected: creEligibleWalletCount,
+        received: Object.keys(teeProofs).length,
+      })
     }
     const rewardAccounting = existingPayment && !escrowAddress()
       ? await accountRewards(purchaseId, pool.contributions.length, existingPayment.amountWei, rewardWindowId)
