@@ -2,11 +2,11 @@
 
 Private period tracker that pays you. 
 
-Video walkthrough with subtitles: https://www.veed.io/view/947cca44-19f4-496c-a5c3-eee37642c23b?source=editor&panel=share
+Video walkthrough with subtitles for hard of hearing (or just snacking and cant hear over the munch crunch crunch): https://www.veed.io/view/947cca44-19f4-496c-a5c3-eee37642c23b?source=editor&panel=share
 
-Test it out, Live Demo here: [Nugget](#)
+Test out the Live Demo! - but its on Render so might take a mintute to load up: [Nugget]([https://gumbledapp.xyz/](https://nugget-j3xq.onrender.com))
 
-Nugget is a decentralised, privacy-preserving womens health app built on Chainlink CRE confidential workflow and Privy. It uses TEE's to ensure user data privacy while enabling period tracking and giving people who have periods the opportunity to earn from their data, anonymously. 
+Nugget is a decentralised, privacy-preserving health app built on Chainlink CRE confidential workflow and Privy. It uses TEE's to ensure user data privacy while enabling period tracking and giving people who have periods the opportunity to earn from their data, anonymously. 
 
 Women weren't even legally required to be included in clinical research until 1993! Most period-tracking apps sell your data without you knowing, or "protect" it by just holding onto it themselves. Nugget does neither: your data is encrypted before it ever leaves your device, aggregated privately inside a Chainlink confidential compute enclave, and you get paid for your contribution — without ever revealing who you are.
 
