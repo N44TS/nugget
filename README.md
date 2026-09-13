@@ -1,6 +1,8 @@
-Nugget.
+# <img width="62" height="50" alt="Image" src="https://github.com/user-attachments/assets/0c9c9d17-db56-4169-b099-8b787df4de3f" /> Nugget.
 
 Private period tracker that pays you. 
+
+Video walkthrough with subtitles:
 
 ## Demo testing
 
