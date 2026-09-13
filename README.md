@@ -2,6 +2,8 @@
 
 Private period tracker that pays you. 
 
+<img width="400" height="449" alt="Image" src="https://github.com/user-attachments/assets/faf854af-cb58-483f-a517-d5216dee0ba7" />
+
 Nugget is a decentralised, privacy-preserving health app built on Chainlink CRE confidential workflow and Privy. It uses TEE's to ensure user data privacy while enabling period tracking and giving people who have periods the opportunity to earn from their data, anonymously. 
 
 Women weren't even legally required to be included in clinical research until 1993! Most period-tracking apps sell your data without you knowing, or "protect" it by just holding onto it themselves. Nugget does neither: your data is encrypted before it ever leaves your device, aggregated privately inside a Chainlink confidential compute enclave, and you get paid for your contribution — without ever revealing who you are.
@@ -94,5 +96,3 @@ To test the contributor and buyer flows at the same time, use two different
 browsers or separate browser profiles. Privy keeps the signed-in session and
 embedded wallet within a browser session, so using one browser for both roles
 can show the same address on both sides. 
-
-<img width="400" height="449" alt="Image" src="https://github.com/user-attachments/assets/faf854af-cb58-483f-a517-d5216dee0ba7" />
