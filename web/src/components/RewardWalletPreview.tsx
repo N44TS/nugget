@@ -12,13 +12,15 @@ export function RewardWalletPreview() {
       <h2 id="reward-wallet-heading">Your Buyer Wallet</h2>
       <p className="lede">
         Sign in as an organization buyer and Privy will create an embedded Ethereum wallet for you.
-        Fund this embedded wallet with Sepolia ETH plus a little gas for the report value before paying for the report.
+         Just send it some Sepolia Eth to get started.
       </p>
       {!ready ? (
         <p className="muted">Loading wallet connection…</p>
       ) : authenticated && wallet ? (
         <>
-          <p className="muted">Connected: {wallet.address}</p>
+          <p className="muted">
+  <span style={{ color: "green", fontWeight: "bold" }}>Connected!</span>{" "}
+</p>
           <button type="button" className="btn" onClick={logout}>Disconnect wallet</button>
         </>
       ) : (
@@ -30,3 +32,4 @@ export function RewardWalletPreview() {
     </section>
   )
 }
+

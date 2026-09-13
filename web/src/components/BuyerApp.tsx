@@ -619,9 +619,9 @@ export function BuyerApp() {
         </div>
         {authenticated && wallet && (
           <p className="muted">
-            Fund this embedded wallet with Sepolia ETH for the report value before paying:
+            You will need to send Sepolia Eth to the wallet created below to fun it to buy the report (will be 000.1 ETH plus gas).
             {" "}
-            <a href="https://sepoliafaucet.com/" target="_blank" rel="noreferrer">
+            <a href="https://ethglobal.com/faucet/sepolia-11155111-eth" target="_blank" rel="noreferrer">
               Open Sepolia faucet
             </a>
           </p>
