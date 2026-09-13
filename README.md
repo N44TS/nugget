@@ -94,3 +94,5 @@ To test the contributor and buyer flows at the same time, use two different
 browsers or separate browser profiles. Privy keeps the signed-in session and
 embedded wallet within a browser session, so using one browser for both roles
 can show the same address on both sides. 
+
+<img width="400" height="449" alt="Image" src="https://github.com/user-attachments/assets/faf854af-cb58-483f-a517-d5216dee0ba7" />
