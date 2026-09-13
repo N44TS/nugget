@@ -82,7 +82,7 @@ Why the whole system works without ever knowing who the person is: the contract 
 
 ## Conclusion
 
-Nugget is an attempt to build the Web3 version of "your data, your choice, your cut" for women's health — genuinely private by architecture, not by policy promise, with real money changing hands in a way no single party fully controls. The core loop, from an anonymous cycle log to a Chainlink-verified payout, works end to end today. Nobody — not me, not a hacker, not even Chainlink — ever needs to see a list connecting a real person to their health data to make the payment happen. The blockchain only ever sees one sealed envelope, and individual stubs being redeemed against it.
+I reaslied Nugget might be a Web3 version of "your data, your choice, your cut" for women's health — but private by architecture instead of policy promise, with real money changing hands in a way no single party fully controls. The core loop, from an anonymous cycle log to a Chainlink-verified payout, works end to end today. Nobody — not me, not a hacker, not even Chainlink — ever needs to see a list connecting a real person to their health data to make the payment happen. The blockchain only ever sees one sealed envelope, and individual stubs being redeemed against it.
 
 ## How it works chart
 <img width="250" height="160" alt="Image" src="https://github.com/user-attachments/assets/8b34d46b-d805-4535-8cc6-2489bd67dc5a" />
@@ -93,5 +93,4 @@ Nugget is an attempt to build the Web3 version of "your data, your choice, your 
 To test the contributor and buyer flows at the same time, use two different
 browsers or separate browser profiles. Privy keeps the signed-in session and
 embedded wallet within a browser session, so using one browser for both roles
-can show the same address on both sides. Contributors do not need to log in
-with an external wallet.
+can show the same address on both sides. 
