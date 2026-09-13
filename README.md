@@ -22,12 +22,7 @@ Test out the Live Demo! - but its on Render so might take a mintute to load up: 
   * [Usage](#usage)
   * [Prerequisites](#prerequisites)
   * [Privacy design](#privacy-design)
-  * [Honest limitations](#honest-limitations)
-  * [License](#license)
-  * [Credits](#credits)
-  * [FAQs](#faqs)
   * [Conclusion](#conclusion)
-  * [In-depth: how payment and Merkle claiming actually works](#in-depth-how-payment-and-merkle-claiming-actually-works)
 
 ## Features Summary
 
@@ -63,8 +58,7 @@ Why the whole system works without ever knowing who the person is: the contract 
 
 1. **Contributor**: log a cycle (period dates, symptoms, age band), optionally opt in to the research pool, optionally create a reward wallet (Privy, one click, no login).
 2. **Buyer**: go to `/buyer`, sign in, pay the report fee — this triggers the CRE aggregation live.
-3. **Watch it happen**: the CRE simulation output streams into the Render logs in real time; the resulting report and escrow settlement transaction appear in the app.
-4. **Contributor claims**: once eligible, a "claim reward" button appears — click it, sign with your Privy wallet, funds arrive directly from the contract.
+3. **Contributor claims**: once eligible, a "claim reward" button appears — click it, sign with your Privy wallet, funds arrive directly from the contract.
 
 ## Prerequisites
 
