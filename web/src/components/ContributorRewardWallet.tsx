@@ -129,12 +129,12 @@ export function ContributorRewardWallet({ contributionCount, rewardBatchId, late
     <section className="reward-wallet" aria-labelledby="contributor-reward-wallet-heading">
       <h3 id="contributor-reward-wallet-heading">Contributor rewards</h3>
       <p className="lede">
-        Register a separate reward wallet after two anonymous contributions. It is eligible for the current 14-day payout window; future contributions stay opted in until you opt out.
+        Register a reward wallet after two anonymous contributions. It is eligible for the current 14-day payout window; future contributions stay opted in until you opt out.
       </p>
       {address ? (
         <>
           <p className="muted">
-            Reward wallet ready: {address}
+            <strong>Reward wallet ready!</strong>
             {batchId && <> · eligible in payout window {batchId}</>}
           </p>
           <WalletCenter address={address} title="Your Contributor wallet" allowExport={authenticated} />

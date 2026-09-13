@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState, useTransition } from "react"
 import Link from "next/link"
 import { ContributorRewardWallet } from "@/components/ContributorRewardWallet"
-import { entryToContribution, newClaimId } from "@/lib/cycle"
+import { daysBetween, entryToContribution, newClaimId } from "@/lib/cycle"
 import { base64ToBytes, encryptForCre } from "@/lib/crypto"
 import { loadEntries, loadReceipts, saveEntries, saveLocalReceipt, type LocalReceipt } from "@/lib/storage"
 import {
@@ -24,15 +24,27 @@ const REWARD_WALLET_KEY = "nugget.rewardWallet.address.v1"
 const WELLBEING_OPTIONS: {
   key: keyof WellbeingSignals
   label: string
+  hint: string
   values: string[]
 }[] = [
-  { key: "energy", label: "Energy", values: ["low", "okay", "good"] },
-  { key: "mood", label: "Mood", values: ["low", "okay", "good"] },
-  { key: "sleep", label: "Sleep quality", values: ["poor", "okay", "good"] },
-  { key: "skin", label: "Skin", values: ["flare-up", "normal", "clear"] },
-  { key: "bleeding", label: "Bleeding intensity", values: ["none", "spotting", "light", "medium", "heavy"] },
-  { key: "pain", label: "Pain / cramps", values: ["none", "mild", "moderate", "strong", "severe"] },
+  { key: "energy", label: "Energy level", hint: "choose one", values: ["low", "okay", "good"] },
+  { key: "mood", label: "Mood", hint: "choose one", values: ["low", "okay", "good"] },
+  { key: "sleep", label: "Sleep quality", hint: "choose one", values: ["poor", "okay", "good"] },
+  { key: "skin", label: "Skin condition", hint: "choose one", values: ["flare-up", "normal", "clear"] },
+  { key: "bleeding", label: "Bleeding intensity", hint: "flow level", values: ["none", "spotting", "light", "medium", "heavy"] },
+  { key: "pain", label: "Pain / cramps severity", hint: "choose one", values: ["none", "mild", "moderate", "strong", "severe"] },
 ]
+
+const formatDateShort = (isoDate: string) => {
+  try {
+    const [y, m, d] = isoDate.split("-")
+    if (!y || !m || !d) return isoDate
+    const date = new Date(Date.UTC(Number(y), Number(m) - 1, Number(d)))
+    return date.toLocaleDateString("en-US", { month: "short", day: "2-digit", timeZone: "UTC" })
+  } catch {
+    return isoDate
+  }
+}
 
 const isCompleteWellbeing = (signals: Partial<WellbeingSignals>): signals is WellbeingSignals =>
   WELLBEING_OPTIONS.every(({ key }) => typeof signals[key] === "string")
@@ -96,6 +108,58 @@ export function TrackerApp({ showRewards = false }: { showRewards?: boolean }) {
   const latestEntryAlreadyContributed = Boolean(
     latestEntryId && contributedEntryIds.includes(latestEntryId),
   )
+
+  const cycleStats = useMemo(() => {
+    if (sorted.length === 0) {
+      return { count: 0, typicalCycle: "—", typicalPeriod: "—", insight: null }
+    }
+    const periodLengths = sorted.map((e) => daysBetween(e.periodStart, e.periodEnd))
+    const avgPeriod = `${(periodLengths.reduce((a, b) => a + b, 0) / periodLengths.length).toFixed(1)}d`
+
+    const chronological = [...sorted].sort((a, b) => a.periodStart.localeCompare(b.periodStart))
+    const cycleIntervals: number[] = []
+    for (let i = 1; i < chronological.length; i++) {
+      const prev = chronological[i - 1]!
+      const curr = chronological[i]!
+      const diffDays = Math.round(
+        (new Date(`${curr.periodStart}T00:00:00Z`).getTime() -
+          new Date(`${prev.periodStart}T00:00:00Z`).getTime()) /
+          (24 * 60 * 60 * 1000),
+      )
+      if (diffDays >= 15 && diffDays <= 90) {
+        cycleIntervals.push(diffDays)
+      }
+    }
+
+    const typicalCycle =
+      cycleIntervals.length > 0
+        ? `${Math.round(cycleIntervals.reduce((a, b) => a + b, 0) / cycleIntervals.length)}d`
+        : sorted.length === 1
+          ? "28d"
+          : "—"
+
+    const allSymptoms = sorted.flatMap((e) => e.symptoms)
+    const symptomFrequency: Record<string, number> = {}
+    for (const s of allSymptoms) {
+      symptomFrequency[s] = (symptomFrequency[s] ?? 0) + 1
+    }
+    const topSymptoms = Object.entries(symptomFrequency)
+      .sort(([, a], [, b]) => b - a)
+      .slice(0, 2)
+      .map(([s]) => s)
+
+    let insight = `Personal pattern: Regular ${typicalCycle !== "—" ? `${typicalCycle} ` : ""}cycle with typical ${avgPeriod} duration.`
+    if (topSymptoms.length > 0) {
+      insight += ` Cramps/symptoms commonly logged: ${topSymptoms.join(", ")}.`
+    }
+
+    return {
+      count: sorted.length,
+      typicalCycle,
+      typicalPeriod: avgPeriod,
+      insight,
+    }
+  }, [sorted])
 
   const toggleSymptom = (id: Symptom) => {
     setSymptoms((prev) => (prev.includes(id) ? prev.filter((s) => s !== id) : [...prev, id]))
@@ -269,48 +333,57 @@ export function TrackerApp({ showRewards = false }: { showRewards?: boolean }) {
           </label>
         </div>
 
-        <fieldset>
-          <legend>Symptoms</legend>
-          <div className="chips">
-            {SYMPTOM_OPTIONS.map((opt) => {
-              const on = symptoms.includes(opt.id)
-              return (
-                <button
-                  key={opt.id}
-                  type="button"
-                  className={on ? "chip on" : "chip"}
-                  aria-pressed={on}
-                  onClick={() => toggleSymptom(opt.id)}
-                >
-                  {opt.label}
-                </button>
-              )
-            })}
-          </div>
-        </fieldset>
-
-        <fieldset className="wellbeing-fields">
-          <legend>Wellbeing signals</legend>
-          <p className="muted">Add the coarse signals that describe this period. They stay private unless you later opt in to research.</p>
-          {WELLBEING_OPTIONS.map((signal) => (
-            <div className="wellbeing-row" key={signal.key}>
-              <span className="wellbeing-label">{signal.label}</span>
-              <div className="chips">
-                {signal.values.map((value) => (
-                  <button
-                    key={value}
-                    type="button"
-                    className={wellbeing[signal.key] === value ? "chip on" : "chip"}
-                    aria-pressed={wellbeing[signal.key] === value}
-                    onClick={() => setWellbeingValue(signal.key, value)}
-                  >
-                    {value}
-                  </button>
-                ))}
+        <div style={{ marginTop: "1rem" }}>
+          <div className="signal-grid">
+            <div className="signal">
+              <div className="signal-head">
+                <span className="signal-name">Symptoms</span>
+                <span className="optional">select all</span>
+              </div>
+              <div className="scale">
+                {SYMPTOM_OPTIONS.map((opt) => {
+                  const on = symptoms.includes(opt.id)
+                  return (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      className={on ? "selected" : ""}
+                      aria-pressed={on}
+                      onClick={() => toggleSymptom(opt.id)}
+                    >
+                      {opt.label}
+                    </button>
+                  )
+                })}
               </div>
             </div>
-          ))}
-        </fieldset>
+
+            {WELLBEING_OPTIONS.map((signal) => (
+              <div className="signal" key={signal.key}>
+                <div className="signal-head">
+                  <span className="signal-name">{signal.label}</span>
+                  <span className="optional">{signal.hint}</span>
+                </div>
+                <div className="scale">
+                  {signal.values.map((value) => {
+                    const isSelected = wellbeing[signal.key] === value
+                    return (
+                      <button
+                        key={value}
+                        type="button"
+                        className={isSelected ? "selected" : ""}
+                        aria-pressed={isSelected}
+                        onClick={() => setWellbeingValue(signal.key, value)}
+                      >
+                        {value}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
 
         <button type="button" className="btn primary" disabled={!isCompleteWellbeing(wellbeing)} onClick={onSave}>
           Save private entry
@@ -318,29 +391,66 @@ export function TrackerApp({ showRewards = false }: { showRewards?: boolean }) {
         {saveStatus && <p className="inline-confirmation" role="status">{saveStatus}</p>}
       </section>
 
-        <section className="panel history-panel" aria-labelledby="history-heading">
-        <p className="step-label"> STORED ONLY ON THIS DEVICE</p>
-        <h2 id="history-heading">Your cycle history <span aria-hidden="true">💫</span></h2>
+      <section className="panel history-panel" aria-labelledby="history-heading">
+        <h2 id="history-heading">Your cycle history </h2>
+        <p className="lede">Stored only on your device.</p>
+
+        {sorted.length > 0 && (
+          <>
+            <div className="cycle-summary">
+              <div className="cycle-stat"><strong>{cycleStats.count}</strong><span>entries</span></div>
+              <div className="cycle-stat"><strong>{cycleStats.typicalCycle}</strong><span>typical cycle</span></div>
+              <div className="cycle-stat"><strong>{cycleStats.typicalPeriod}</strong><span>typical period</span></div>
+            </div>
+
+            {cycleStats.insight && (
+              <div className="pattern-insight">
+                <strong>Personal pattern:</strong> {cycleStats.insight.replace(/^Personal pattern:\s*/, "")}
+              </div>
+            )}
+          </>
+        )}
+
         {sorted.length === 0 ? (
-          <p className="muted">No entries yet.</p>
+          <p className="muted">No entries yet. Log a period above to see your private local patterns.</p>
         ) : (
-          <ul className="history">
-            {sorted.map((e) => (
-              <li key={e.id}>
-                <span className="range">
-                  {e.periodStart} → {e.periodEnd}
-                </span>
-                <span className="syms">{e.symptoms.join(", ") || "no symptoms"}</span>
-              </li>
-            ))}
+          <ul className="history-list">
+            {sorted.map((e, idx) => {
+              const flowDays = daysBetween(e.periodStart, e.periodEnd)
+              const nextOlder = sorted[idx + 1]
+              let cycleDays: number | null = null
+              if (nextOlder) {
+                cycleDays = Math.round(
+                  (new Date(`${e.periodStart}T00:00:00Z`).getTime() -
+                    new Date(`${nextOlder.periodStart}T00:00:00Z`).getTime()) /
+                    (24 * 60 * 60 * 1000),
+                )
+              }
+              return (
+                <li key={e.id}>
+                  <span className="range">
+                    {formatDateShort(e.periodStart)} → {formatDateShort(e.periodEnd)}
+                  </span>
+                  <span className="syms">
+                    {e.symptoms.map((s) => s.charAt(0).toUpperCase() + s.slice(1)).join(", ") || "No symptoms"}
+                  </span>
+                  <span className="meta-tag">
+                    {cycleDays != null ? `${cycleDays}d cycle · ` : ""}{flowDays}d flow
+                  </span>
+                </li>
+              )
+            })}
           </ul>
         )}
+        <p className="muted" style={{ marginTop: "1rem" }}>
+          Research contributions stay completely separate from this private view.
+        </p>
       </section>
 
        <section className="panel step-panel log-panel" aria-labelledby="profile-heading">
         <p className="step-label">PROFILE</p>
         <h2 id="profile-heading">Choose an age band</h2>
-        <p className="lede">This is not needed for private tracking. It is only used if you later choose to contribute an anonymous summary — never your name or birthday.</p>
+        <p className="lede">This is not needed for private tracking. It is only used if you ever want to contribute an anonymous summary — never your name or any personal indentifiers</p>
         <div className="chips">
           {AGE_BAND_OPTIONS.map((opt) => (
             <button
@@ -357,7 +467,6 @@ export function TrackerApp({ showRewards = false }: { showRewards?: boolean }) {
       </section>
 
       <section className="panel step-panel optin-panel" aria-labelledby="optin-heading">
-        <p className="step-label"> OPTIONAL CONTRIBUTION</p>
         <h2 id="optin-heading">Contribute to research</h2>
         <p className="lede">
           Your private diary never leaves this device. If you opt in, we send only an encrypted, anonymous summary of your cycle, symptoms, and wellbeing signals to a shared research batch.

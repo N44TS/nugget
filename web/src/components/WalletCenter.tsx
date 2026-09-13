@@ -87,7 +87,7 @@ export function WalletCenter({
   return (
     <section className="wallet-center" aria-labelledby={`${title.toLowerCase().replace(/\s+/g, "-")}-heading`}>
       <div className="wallet-heading">
-        <div>
+        <div style={{ flex: 1, minWidth: 0, marginRight: "1rem" }}>
           <h4 id={`${title.toLowerCase().replace(/\s+/g, "-")}-heading`}>{title}</h4>
           <p className="wallet-address">{address}</p>
         </div>
