@@ -2,11 +2,29 @@ export type Symptom = "cramps" | "mood" | "headache" | "fatigue"
 
 export type AgeBand = "18-24" | "25-34" | "35-44" | "45+"
 
+export type EnergyLevel = "low" | "okay" | "good"
+export type MoodLevel = "low" | "okay" | "good"
+export type SleepQuality = "poor" | "okay" | "good"
+export type SkinCondition = "flare-up" | "normal" | "clear"
+export type BleedingIntensity = "none" | "spotting" | "light" | "medium" | "heavy"
+export type PainSeverity = "none" | "mild" | "moderate" | "strong" | "severe"
+
+export type WellbeingSignals = {
+  energy: EnergyLevel
+  mood: MoodLevel
+  sleep: SleepQuality
+  skin: SkinCondition
+  bleeding: BleedingIntensity
+  pain: PainSeverity
+}
+
 export type CycleEntry = {
   id: string
   periodStart: string // YYYY-MM-DD
   periodEnd: string
   symptoms: Symptom[]
+  /** Optional for legacy local entries created before wellbeing signals existed. */
+  wellbeing?: WellbeingSignals
   createdAt: string
 }
 
@@ -16,6 +34,8 @@ export type Contribution = {
   periodLengthDays: number
   symptoms: string[]
   ageBand: AgeBand
+  /** Present on new contributions; optional so earlier encrypted rows remain readable. */
+  wellbeing?: WellbeingSignals
   /** Present on new encrypted rows; optional so earlier local demo data stays readable. */
   payoutWindowId?: string
   submittedAt?: string

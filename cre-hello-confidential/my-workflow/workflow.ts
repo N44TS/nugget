@@ -157,7 +157,7 @@ export const onCronTrigger = (runtime: TeeRuntime<Config>): string => {
 	)
 	const summary = formatPublicSummary(report)
 	const simulationSummary = report.kAnonOk
-		? `OK batch=${report.epoch} n=${report.contributorCount} avgCycle=${report.avgCycleLength} avgPeriod=${report.avgPeriodLength} symptoms={${Object.entries(report.symptomRates ?? {}).sort(([a], [b]) => a.localeCompare(b)).map(([key, value]) => `${key}:${value}`).join(',')}} ageShare={${Object.entries(report.ageBandShare ?? {}).sort(([a], [b]) => a.localeCompare(b)).map(([key, value]) => `${key}:${value}`).join(',')}} avgCycleByAge={${Object.entries(report.avgCycleByAgeBand ?? {}).sort(([a], [b]) => a.localeCompare(b)).map(([key, value]) => `${key}:${value}`).join(',')}} kAnon=passed rejected=${report.rejectedCount} rewardRoot=${report.rewardMerkleRoot ?? 'none'} eligibleWallets=${report.eligibleWalletCount}`
+		? formatPublicSummary(report).replace(' rejected=', ' kAnon=passed rejected=')
 		: `SUPPRESSED batch=${report.epoch} n=${report.contributorCount} kMin=${report.kMin}`
 
 	// Simulation-only log — no raw rows, no secret

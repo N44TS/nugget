@@ -1,6 +1,5 @@
 import { BuyerApp } from "@/components/BuyerApp"
 import { PrivyShell } from "@/components/PrivyShell"
-import { RewardWalletPreview } from "@/components/RewardWalletPreview"
 import Image from "next/image"
 
 export default function BuyerPage() {
@@ -21,7 +20,7 @@ export default function BuyerPage() {
                   priority 
                 />
             </h1>
-            <p className="tagline">Research signals, never individual diaries.</p>
+            <p className="tagline">Aggregated raw data and research signals.</p>
           </div>
           <aside className="privacy-promise" aria-label="Research privacy promise">
             <span aria-hidden="true">🛡️</span>
@@ -29,7 +28,6 @@ export default function BuyerPage() {
           </aside>
         </header>
         <BuyerApp />
-        {privyAppId && <RewardWalletPreview />}
         <p className="foot">
           No individual diaries. Aggregation happens in the CRE confidential workflow path.
         </p>

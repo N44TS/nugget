@@ -12,6 +12,7 @@ import {
   type AgeBand,
   type CycleEntry,
   type Symptom,
+  type WellbeingSignals,
 } from "@/lib/types"
 
 const today = () => new Date().toISOString().slice(0, 10)
@@ -19,6 +20,22 @@ const AGE_KEY = "nugget.profile.ageBand.v1"
 const CONTRIBUTED_ENTRY_IDS_KEY = "nugget.contributions.entryIds.v1"
 const RESEARCH_OPT_IN_KEY = "nugget.research.optedIn.v1"
 const REWARD_WALLET_KEY = "nugget.rewardWallet.address.v1"
+
+const WELLBEING_OPTIONS: {
+  key: keyof WellbeingSignals
+  label: string
+  values: string[]
+}[] = [
+  { key: "energy", label: "Energy", values: ["low", "okay", "good"] },
+  { key: "mood", label: "Mood", values: ["low", "okay", "good"] },
+  { key: "sleep", label: "Sleep quality", values: ["poor", "okay", "good"] },
+  { key: "skin", label: "Skin", values: ["flare-up", "normal", "clear"] },
+  { key: "bleeding", label: "Bleeding intensity", values: ["none", "spotting", "light", "medium", "heavy"] },
+  { key: "pain", label: "Pain / cramps", values: ["none", "mild", "moderate", "strong", "severe"] },
+]
+
+const isCompleteWellbeing = (signals: Partial<WellbeingSignals>): signals is WellbeingSignals =>
+  WELLBEING_OPTIONS.every(({ key }) => typeof signals[key] === "string")
 
 const loadContributedEntryIds = (): string[] => {
   try {
@@ -51,6 +68,7 @@ export function TrackerApp({ showRewards = false }: { showRewards?: boolean }) {
   const [periodStart, setPeriodStart] = useState(today())
   const [periodEnd, setPeriodEnd] = useState(today())
   const [symptoms, setSymptoms] = useState<Symptom[]>(["cramps"])
+  const [wellbeing, setWellbeing] = useState<Partial<WellbeingSignals>>({})
   const [status, setStatus] = useState<string | null>(null)
   const [saveStatus, setSaveStatus] = useState<string | null>(null)
   const [poolSummary, setPoolSummary] = useState<string | null>(null)
@@ -83,6 +101,10 @@ export function TrackerApp({ showRewards = false }: { showRewards?: boolean }) {
     setSymptoms((prev) => (prev.includes(id) ? prev.filter((s) => s !== id) : [...prev, id]))
   }
 
+  const setWellbeingValue = (key: keyof WellbeingSignals, value: string) => {
+    setWellbeing((prev) => ({ ...prev, [key]: value }))
+  }
+
   const persist = (next: CycleEntry[]) => {
     setEntries(next)
     saveEntries(next)
@@ -95,11 +117,16 @@ export function TrackerApp({ showRewards = false }: { showRewards?: boolean }) {
       setError("Period end must be on or after start.")
       return
     }
+    if (!isCompleteWellbeing(wellbeing)) {
+      setError("Complete each wellbeing signal before saving this period.")
+      return
+    }
     const entry: CycleEntry = {
       id: crypto.randomUUID(),
       periodStart,
       periodEnd,
       symptoms,
+      wellbeing,
       createdAt: new Date().toISOString(),
     }
     persist([entry, ...entries])
@@ -262,7 +289,30 @@ export function TrackerApp({ showRewards = false }: { showRewards?: boolean }) {
           </div>
         </fieldset>
 
-        <button type="button" className="btn primary" onClick={onSave}>
+        <fieldset className="wellbeing-fields">
+          <legend>Wellbeing signals</legend>
+          <p className="muted">Add the coarse signals that describe this period. They stay private unless you later opt in to research.</p>
+          {WELLBEING_OPTIONS.map((signal) => (
+            <div className="wellbeing-row" key={signal.key}>
+              <span className="wellbeing-label">{signal.label}</span>
+              <div className="chips">
+                {signal.values.map((value) => (
+                  <button
+                    key={value}
+                    type="button"
+                    className={wellbeing[signal.key] === value ? "chip on" : "chip"}
+                    aria-pressed={wellbeing[signal.key] === value}
+                    onClick={() => setWellbeingValue(signal.key, value)}
+                  >
+                    {value}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+        </fieldset>
+
+        <button type="button" className="btn primary" disabled={!isCompleteWellbeing(wellbeing)} onClick={onSave}>
           Save private entry
         </button>
         {saveStatus && <p className="inline-confirmation" role="status">{saveStatus}</p>}
@@ -310,7 +360,7 @@ export function TrackerApp({ showRewards = false }: { showRewards?: boolean }) {
         <p className="step-label"> OPTIONAL CONTRIBUTION</p>
         <h2 id="optin-heading">Contribute to research</h2>
         <p className="lede">
-          Your private diary never leaves this device. If you opt in, we send only an encrypted, anonymous summary of your cycle and symptoms to a shared research batch.
+          Your private diary never leaves this device. If you opt in, we send only an encrypted, anonymous summary of your cycle, symptoms, and wellbeing signals to a shared research batch.
         </p>
         <div className="batch-explainer">
           <strong>What is a batch?</strong>

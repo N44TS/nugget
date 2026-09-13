@@ -12,7 +12,7 @@ export function RewardWalletPreview() {
       <h2 id="reward-wallet-heading">Your Buyer Wallet</h2>
       <p className="lede">
         Sign in as an organization buyer and Privy will create an embedded Ethereum wallet for you.
-        Contributors do not need an account or wallet.
+        Fund this embedded wallet with Sepolia ETH plus a little gas for the report value before paying for the report.
       </p>
       {!ready ? (
         <p className="muted">Loading wallet connection…</p>

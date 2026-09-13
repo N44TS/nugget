@@ -58,6 +58,7 @@ export const entryToContribution = (
     periodLengthDays,
     symptoms: latest.symptoms,
     ageBand,
+    wellbeing: latest.wellbeing,
     payoutWindowId: payoutWindow,
     submittedAt: new Date().toISOString(),
   }

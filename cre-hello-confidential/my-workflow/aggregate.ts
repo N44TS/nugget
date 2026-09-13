@@ -10,12 +10,22 @@ import { concatHex, encodePacked, getAddress, keccak256, type Hex } from 'viem'
 
 export type AgeBand = '18-24' | '25-34' | '35-44' | '45+'
 
+export type WellbeingSignals = {
+	energy: 'low' | 'okay' | 'good'
+	mood: 'low' | 'okay' | 'good'
+	sleep: 'poor' | 'okay' | 'good'
+	skin: 'flare-up' | 'normal' | 'clear'
+	bleeding: 'none' | 'spotting' | 'light' | 'medium' | 'heavy'
+	pain: 'none' | 'mild' | 'moderate' | 'strong' | 'severe'
+}
+
 export type Contribution = {
 	claimId: string
 	cycleLengthDays: number
 	periodLengthDays: number
 	symptoms: string[]
 	ageBand: AgeBand
+	wellbeing?: WellbeingSignals
 	payoutWindowId?: string
 	submittedAt?: string
 }
@@ -49,9 +59,30 @@ export type AggregateReport = {
 	symptomRates: Record<string, number> | null
 	ageBandShare: Record<string, number> | null
 	avgCycleByAgeBand: Record<string, number> | null
+	ageBandStats: Record<string, SegmentStats> | null
+	cycleLengthStats: Record<string, SegmentStats> | null
+	moderateSeverePainRate: number | null
+	/** Signal category shares, calculated only from contributions that supplied that signal. */
+	wellbeingDistributions: Record<string, Record<string, number>> | null
+	/** Observed joint shares, never labelled as relative risk or causation. */
+	coOccurrenceRates: Record<string, number> | null
 	rewardMerkleRoot: string | null
 	eligibleWalletCount: number
 	rewardProofs: Record<string, Hex[]>
+}
+
+export type SegmentStats = {
+	count: number
+	share: number
+	avgCycle: number
+	avgPeriod: number
+	moderateSeverePain: number | null
+	irregularCycle: number
+	wellbeingCount: number
+	moderateSeverePainCount: number
+	heavyBleeding: number | null
+	poorSleep: number | null
+	skinFlare: number | null
 }
 
 const rewardLeaf = (wallet: string): Hex => keccak256(encodePacked(['address'], [getAddress(wallet)]))
@@ -96,6 +127,14 @@ const CYCLE_MAX = 90
 const PERIOD_MIN = 1
 const PERIOD_MAX = 15
 
+const isValidWellbeing = (signals: WellbeingSignals): boolean =>
+	['low', 'okay', 'good'].includes(signals.energy) &&
+	['low', 'okay', 'good'].includes(signals.mood) &&
+	['poor', 'okay', 'good'].includes(signals.sleep) &&
+	['flare-up', 'normal', 'clear'].includes(signals.skin) &&
+	['none', 'spotting', 'light', 'medium', 'heavy'].includes(signals.bleeding) &&
+	['none', 'mild', 'moderate', 'strong', 'severe'].includes(signals.pain)
+
 export const isValidContribution = (c: Contribution): boolean => {
 	if (!c.claimId || typeof c.claimId !== 'string') return false
 	if (!c.ageBand) return false
@@ -110,6 +149,7 @@ export const isValidContribution = (c: Contribution): boolean => {
 		return false
 	}
 	if (!Array.isArray(c.symptoms)) return false
+	if (c.wellbeing && !isValidWellbeing(c.wellbeing)) return false
 	return true
 }
 
@@ -187,6 +227,11 @@ export const aggregateContributions = (
 			symptomRates: null,
 			ageBandShare: null,
 			avgCycleByAgeBand: null,
+			ageBandStats: null,
+			cycleLengthStats: null,
+			moderateSeverePainRate: null,
+			wellbeingDistributions: null,
+			coOccurrenceRates: null,
 			rewardMerkleRoot: null,
 			eligibleWalletCount: 0,
 			rewardProofs: {},
@@ -232,10 +277,95 @@ export const aggregateContributions = (
 
 	const ageBandShare: Record<string, number> = {}
 	const avgCycleByAgeBand: Record<string, number> = {}
+	const segmentStats = (rows: Contribution[]): SegmentStats => {
+		const wellbeingRows = rows.filter((row) => row.wellbeing)
+		const painRows = wellbeingRows.filter((row) =>
+			['moderate', 'strong', 'severe'].includes(row.wellbeing?.pain ?? ''),
+		)
+		const heavyBleedingRows = wellbeingRows.filter((row) => row.wellbeing?.bleeding === 'heavy')
+		const poorSleepRows = wellbeingRows.filter((row) => row.wellbeing?.sleep === 'poor')
+		const skinFlareRows = wellbeingRows.filter((row) => row.wellbeing?.skin === 'flare-up')
+		return {
+			count: rows.length,
+			share: round1(rows.length / contributorCount),
+			avgCycle: round1(rows.reduce((sum, row) => sum + row.cycleLengthDays, 0) / rows.length),
+			avgPeriod: round1(rows.reduce((sum, row) => sum + row.periodLengthDays, 0) / rows.length),
+			moderateSeverePain:
+				wellbeingRows.length >= kMin && painRows.length >= kMin ? round1(painRows.length / wellbeingRows.length) : null,
+			irregularCycle: round1(rows.filter((row) => row.cycleLengthDays > 35).length / rows.length),
+			wellbeingCount: wellbeingRows.length,
+			moderateSeverePainCount: painRows.length,
+			heavyBleeding:
+				wellbeingRows.length >= kMin && heavyBleedingRows.length >= kMin ? round1(heavyBleedingRows.length / wellbeingRows.length) : null,
+			poorSleep:
+				wellbeingRows.length >= kMin && poorSleepRows.length >= kMin ? round1(poorSleepRows.length / wellbeingRows.length) : null,
+			skinFlare:
+				wellbeingRows.length >= kMin && skinFlareRows.length >= kMin ? round1(skinFlareRows.length / wellbeingRows.length) : null,
+		}
+	}
+	const ageBandStats: Record<string, SegmentStats> = {}
 	for (const [band, count] of Object.entries(bandCounts).sort(([a], [b]) => a.localeCompare(b))) {
 		if (count >= kMin) {
 			ageBandShare[band] = round1(count / contributorCount)
 			avgCycleByAgeBand[band] = round1((bandCycleSum[band] ?? 0) / count)
+			ageBandStats[band] = segmentStats(valid.filter((row) => row.ageBand === band))
+		}
+	}
+	const cycleLengthStats: Record<string, SegmentStats> = {}
+	const cycleBuckets: Record<string, (row: Contribution) => boolean> = {
+		short: (row) => row.cycleLengthDays < 25,
+		typical: (row) => row.cycleLengthDays >= 25 && row.cycleLengthDays <= 35,
+		long: (row) => row.cycleLengthDays > 35,
+	}
+	for (const [bucket, matches] of Object.entries(cycleBuckets).sort(([a], [b]) => a.localeCompare(b))) {
+		const rows = valid.filter(matches)
+		if (rows.length >= kMin) cycleLengthStats[bucket] = segmentStats(rows)
+	}
+
+	const wellbeingDistributions: Record<string, Record<string, number>> = {}
+	const wellbeingRows = valid.filter((contribution) => contribution.wellbeing)
+	const moderateSeverePainRows = wellbeingRows.filter((contribution) =>
+		['moderate', 'strong', 'severe'].includes(contribution.wellbeing?.pain ?? ''),
+	)
+	const moderateSeverePainRate =
+		wellbeingRows.length >= kMin && moderateSeverePainRows.length >= kMin
+			? round1(moderateSeverePainRows.length / wellbeingRows.length)
+			: null
+	const wellbeingFields = ['energy', 'mood', 'sleep', 'skin', 'bleeding', 'pain'] as const
+	for (const field of wellbeingFields) {
+		const rows = valid.filter((contribution) => contribution.wellbeing?.[field] !== undefined)
+		if (rows.length < kMin) continue
+		const counts: Record<string, number> = {}
+		for (const row of rows) {
+			const value = row.wellbeing?.[field]
+			if (value) counts[value] = (counts[value] ?? 0) + 1
+		}
+		const disclosed = Object.entries(counts)
+			.filter(([, count]) => count >= kMin)
+			.sort(([a], [b]) => a.localeCompare(b))
+		if (disclosed.length) {
+			wellbeingDistributions[field] = Object.fromEntries(
+				disclosed.map(([value, count]) => [value, round1(count / rows.length)]),
+			)
+		}
+	}
+
+	const coOccurrenceDefinitions: Record<string, (contribution: Contribution) => boolean> = {
+		sleepGood_skinClear: (c) => c.wellbeing?.sleep === 'good' && c.wellbeing?.skin === 'clear',
+		bleedingHeavy_painModerateOrWorse: (c) =>
+			c.wellbeing?.bleeding === 'heavy' &&
+			['moderate', 'strong', 'severe'].includes(c.wellbeing.pain),
+		skinFlare_moodLow: (c) => c.wellbeing?.skin === 'flare-up' && c.wellbeing?.mood === 'low',
+		painModerateOrWorse_skinFlare: (c) =>
+			['moderate', 'strong', 'severe'].includes(c.wellbeing?.pain ?? '') &&
+			c.wellbeing?.skin === 'flare-up',
+	}
+	const coOccurrenceRates: Record<string, number> = {}
+	for (const [name, matches] of Object.entries(coOccurrenceDefinitions).sort(([a], [b]) => a.localeCompare(b))) {
+		const rows = valid.filter((contribution) => contribution.wellbeing)
+		const matching = rows.filter(matches).length
+		if (rows.length >= kMin && matching >= kMin) {
+			coOccurrenceRates[name] = round1(matching / rows.length)
 		}
 	}
 
@@ -251,6 +381,11 @@ export const aggregateContributions = (
 		symptomRates,
 		ageBandShare: Object.keys(ageBandShare).sort().length ? ageBandShare : null,
 		avgCycleByAgeBand: Object.keys(avgCycleByAgeBand).sort().length ? avgCycleByAgeBand : null,
+		ageBandStats: Object.keys(ageBandStats).sort().length ? ageBandStats : null,
+		cycleLengthStats: Object.keys(cycleLengthStats).sort().length ? cycleLengthStats : null,
+		moderateSeverePainRate,
+		wellbeingDistributions: Object.keys(wellbeingDistributions).sort().length ? wellbeingDistributions : null,
+		coOccurrenceRates: Object.keys(coOccurrenceRates).sort().length ? coOccurrenceRates : null,
 		rewardMerkleRoot: rewardMerkleRoot(uniqueEligibleWallets),
 		eligibleWalletCount: uniqueEligibleWallets.length,
 		rewardProofs: rewardProofs(uniqueEligibleWallets),
@@ -276,5 +411,30 @@ export const formatPublicSummary = (report: AggregateReport): string => {
 				.map(([k, v]) => `${k}:${v}`)
 				.join(',')
 		: ''
-	return `OK batch=${report.epoch} n=${report.contributorCount} avgCycle=${report.avgCycleLength} avgPeriod=${report.avgPeriodLength} symptoms={${symptoms}} ageShare={${ages}} avgCycleByAge={${avgByAge}} rejected=${report.rejectedCount} rewardRoot=${report.rewardMerkleRoot ?? 'none'} eligibleWallets=${report.eligibleWalletCount}`
+	const encodeSegments = (segments: Record<string, SegmentStats> | null): string =>
+		segments
+			? Object.entries(segments)
+					.sort(([a], [b]) => a.localeCompare(b))
+					.map(([key, stats]) =>
+						`${key}:${stats.count}|${stats.share}|${stats.avgCycle}|${stats.avgPeriod}|${stats.moderateSeverePain ?? 'x'}|${stats.irregularCycle}|${stats.wellbeingCount}|${stats.moderateSeverePainCount}|${stats.heavyBleeding ?? 'x'}|${stats.poorSleep ?? 'x'}|${stats.skinFlare ?? 'x'}`,
+					)
+					.join(',')
+			: ''
+	const wellbeing = report.wellbeingDistributions
+		? Object.entries(report.wellbeingDistributions)
+				.sort(([a], [b]) => a.localeCompare(b))
+				.flatMap(([field, values]) =>
+					Object.entries(values)
+						.sort(([a], [b]) => a.localeCompare(b))
+						.map(([value, rate]) => `${field}.${value}:${rate}`),
+				)
+				.join(',')
+		: ''
+	const coOccurrence = report.coOccurrenceRates
+		? Object.entries(report.coOccurrenceRates)
+				.sort(([a], [b]) => a.localeCompare(b))
+				.map(([key, value]) => `${key}:${value}`)
+				.join(',')
+		: ''
+	return `OK batch=${report.epoch} n=${report.contributorCount} avgCycle=${report.avgCycleLength} avgPeriod=${report.avgPeriodLength} symptoms={${symptoms}} ageShare={${ages}} avgCycleByAge={${avgByAge}} rejected=${report.rejectedCount} rewardRoot=${report.rewardMerkleRoot ?? 'none'} eligibleWallets=${report.eligibleWalletCount} wellbeing={${wellbeing}} coOccurrence={${coOccurrence}} ageStats={${encodeSegments(report.ageBandStats)}} cycleStats={${encodeSegments(report.cycleLengthStats)}} painRate=${report.moderateSeverePainRate ?? 'x'}`
 }

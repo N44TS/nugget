@@ -9,6 +9,7 @@ import {
 	decryptForCre,
 	decryptAuthenticatedUtf8,
 	encryptAuthenticatedUtf8,
+	formatPublicSummary,
 	isValidContribution,
 	parseContributionBatch,
 	type ContributionBatch,
@@ -135,6 +136,44 @@ describe('aggregate', () => {
 		expect(report.avgCycleLength).toBeGreaterThan(20)
 		expect(report.ageBandShare?.['25-34']).toBeGreaterThan(0)
 		expect(report.avgCycleByAgeBand?.['25-34']).toBeGreaterThan(20)
+	})
+
+	test('aggregates wellbeing signals and only discloses observed co-occurrence rates', () => {
+		const wellbeingBatch: ContributionBatch = {
+			epoch: 'wellbeing-test',
+			contributions: [
+				{
+					claimId: 'w01',
+					cycleLengthDays: 28,
+					periodLengthDays: 5,
+					symptoms: ['cramps'],
+					ageBand: '25-34',
+					wellbeing: { energy: 'okay', mood: 'okay', sleep: 'good', skin: 'clear', bleeding: 'heavy', pain: 'moderate' },
+				},
+				{
+					claimId: 'w02',
+					cycleLengthDays: 29,
+					periodLengthDays: 4,
+					symptoms: ['fatigue'],
+					ageBand: '25-34',
+					wellbeing: { energy: 'low', mood: 'low', sleep: 'good', skin: 'clear', bleeding: 'heavy', pain: 'severe' },
+				},
+				{
+					claimId: 'w03',
+					cycleLengthDays: 27,
+					periodLengthDays: 5,
+					symptoms: ['headache'],
+					ageBand: '25-34',
+					wellbeing: { energy: 'good', mood: 'okay', sleep: 'poor', skin: 'normal', bleeding: 'light', pain: 'mild' },
+				},
+			],
+		}
+		const report = aggregateContributions(wellbeingBatch, 2)
+		expect(report.wellbeingDistributions?.sleep?.good).toBeCloseTo(0.7)
+		expect(report.wellbeingDistributions?.sleep?.poor).toBeUndefined()
+		expect(report.coOccurrenceRates?.sleepGood_skinClear).toBeCloseTo(0.7)
+		expect(report.coOccurrenceRates?.bleedingHeavy_painModerateOrWorse).toBeCloseTo(0.7)
+		expect(formatPublicSummary(report)).toContain('coOccurrence=')
 	})
 
 	test('only pays wallets tied to a valid contribution in the selected payout window', () => {

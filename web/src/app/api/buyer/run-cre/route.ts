@@ -36,11 +36,30 @@ type PublicReport = {
   symptomRates: Record<string, number> | null
   ageBandShare: Record<string, number> | null
   avgCycleByAgeBand: Record<string, number> | null
+  wellbeingDistributions: Record<string, Record<string, number>> | null
+  coOccurrenceRates: Record<string, number> | null
+  ageBandStats: Record<string, SegmentStats> | null
+  cycleLengthStats: Record<string, SegmentStats> | null
+  moderateSeverePainRate: number | null
   rejectedCount: number
   kMin: number
   kAnonOk: boolean
   rewardRoot: string | null
   eligibleWallets: number
+}
+
+type SegmentStats = {
+  count: number
+  share: number
+  avgCycle: number
+  avgPeriod: number
+  moderateSeverePain: number | null
+  irregularCycle: number
+  wellbeingCount: number
+  moderateSeverePainCount: number
+  heavyBleeding: number | null
+  poorSleep: number | null
+  skinFlare: number | null
 }
 
 function parsePublicReport(summary: string): PublicReport | null {
@@ -54,6 +73,11 @@ function parsePublicReport(summary: string): PublicReport | null {
       symptomRates: null,
       ageBandShare: null,
       avgCycleByAgeBand: null,
+      wellbeingDistributions: null,
+      coOccurrenceRates: null,
+      ageBandStats: null,
+      cycleLengthStats: null,
+      moderateSeverePainRate: null,
       rejectedCount: 0,
       kMin: Number(suppressed[3]),
       kAnonOk: false,
@@ -62,7 +86,7 @@ function parsePublicReport(summary: string): PublicReport | null {
     }
   }
   const match = summary.match(
-    /^OK batch=(\S+) n=(\d+) avgCycle=([\d.]+) avgPeriod=([\d.]+) symptoms=\{([^}]*)\} ageShare=\{([^}]*)\} avgCycleByAge=\{([^}]*)\} kAnon=passed rejected=(\d+) rewardRoot=(\S+) eligibleWallets=(\d+)/,
+    /^OK batch=(\S+) n=(\d+) avgCycle=([\d.]+) avgPeriod=([\d.]+) symptoms=\{([^}]*)\} ageShare=\{([^}]*)\} avgCycleByAge=\{([^}]*)\} kAnon=passed rejected=(\d+) rewardRoot=(\S+) eligibleWallets=(\d+)(?: wellbeing=\{([^}]*)\} coOccurrence=\{([^}]*)\})?(?: ageStats=\{([^}]*)\} cycleStats=\{([^}]*)\})?(?: painRate=([^ ]+))?/,
   )
   if (!match) return null
   return {
@@ -73,6 +97,11 @@ function parsePublicReport(summary: string): PublicReport | null {
     symptomRates: parseReportMap(match[5]),
     ageBandShare: parseReportMap(match[6]),
     avgCycleByAgeBand: parseReportMap(match[7]),
+    wellbeingDistributions: parseWellbeingMap(match[11]),
+    coOccurrenceRates: parseReportMap(match[12]),
+    ageBandStats: parseSegmentStats(match[13]),
+    cycleLengthStats: parseSegmentStats(match[14]),
+    moderateSeverePainRate: match[15] && match[15] !== "x" ? Number(match[15]) : null,
     rejectedCount: Number(match[8]),
     kMin: K_MIN,
     kAnonOk: true,
@@ -81,10 +110,48 @@ function parsePublicReport(summary: string): PublicReport | null {
   }
 }
 
-function parseReportMap(value: string): Record<string, number> | null {
+function parseReportMap(value?: string): Record<string, number> | null {
+  if (!value) return null
   const entries = value.split(",").filter(Boolean).map((entry) => entry.split(":"))
   if (entries.length === 0) return null
   return Object.fromEntries(entries.map(([key, number]) => [key, Number(number)]))
+}
+
+function parseWellbeingMap(value?: string): Record<string, Record<string, number>> | null {
+  if (!value) return null
+  const parsed: Record<string, Record<string, number>> = {}
+  for (const entry of value.split(",").filter(Boolean)) {
+    const [field, category, number] = entry.split(/[.:]/)
+    if (!field || !category || !number) continue
+    parsed[field] ??= {}
+    parsed[field][category] = Number(number)
+  }
+
+  return Object.keys(parsed).length ? parsed : null
+}
+
+function parseSegmentStats(value?: string): Record<string, SegmentStats> | null {
+  if (!value) return null
+  const parsed: Record<string, SegmentStats> = {}
+  for (const entry of value.split(",").filter(Boolean)) {
+    const [key, encoded] = entry.split(":")
+    const [count, share, avgCycle, avgPeriod, pain, irregularCycle, wellbeingCount, moderateSeverePainCount, heavyBleeding, poorSleep, skinFlare] = (encoded ?? "").split("|").map(Number)
+    if (!key || !Number.isFinite(count) || !Number.isFinite(share) || !Number.isFinite(avgCycle) || !Number.isFinite(avgPeriod) || !Number.isFinite(irregularCycle)) continue
+    parsed[key] = {
+      count,
+      share,
+      avgCycle,
+      avgPeriod,
+      moderateSeverePain: Number.isFinite(pain) ? pain : null,
+      irregularCycle,
+      wellbeingCount: Number.isFinite(wellbeingCount) ? wellbeingCount : 0,
+      moderateSeverePainCount: Number.isFinite(moderateSeverePainCount) ? moderateSeverePainCount : 0,
+      heavyBleeding: Number.isFinite(heavyBleeding) ? heavyBleeding : null,
+      poorSleep: Number.isFinite(poorSleep) ? poorSleep : null,
+      skinFlare: Number.isFinite(skinFlare) ? skinFlare : null,
+    }
+  }
+  return Object.keys(parsed).length ? parsed : null
 }
 
 async function verifyPayment(txHash: string, expectedBatchId?: string) {
