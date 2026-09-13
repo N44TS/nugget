@@ -76,52 +76,23 @@ Why the whole system works without ever knowing who the person is: the contract 
 - `/api/rewards/opt-in` (wallet registration) only ever knows a wallet address and a payout window — never a reference to any specific health submission.
 - These write to separate database tables with no join between them.
 - Reward payout groups respect the same k-anonymity minimum as the data aggregate itself.
-- **Honest framing**: this is *pseudonymity*, not full anonymity. Wallet activity is publicly observable on Sepolia forever, and a sufficiently motivated observer could still attempt network-level timing correlation between requests. We chose to state this plainly rather than overclaim it.
 
-## Honest limitations
+## limitations
 
-- **CRE is demonstrated via simulation (`cre workflow simulate`), not a live deployment.** Confidential-workflow deploy access is a gated beta we don't yet have. Simulation is explicitly an accepted, valid way to satisfy the track's requirements — but it is not yet running on Chainlink's live DON, and we say so rather than imply otherwise.
-- **The eligible-wallet list is currently assembled by our own server after CRE finishes, not inside the TEE itself.** The contract still correctly enforces "no double claims" and "only pays wallets proven to be on the submitted list" — but right now, it trusts our server to have submitted the *correct* list. Closing this gap means feeding encrypted reward-wallet registrations into CRE directly, so the TEE derives the eligible list and Merkle root itself, and the app server never gets to choose who's paid. This is the single most valuable next step for the project.
-- **Payout lifecycle**: rewards settle on a 14-day payout window (anyone with at least one valid contribution in that window shares that window's pool equally), while buyers can purchase a report covering a rolling six-month scope. This means a contributor can be rewarded from multiple buyer purchases over time, not just once ever — but the windowing logic is a recent addition and still being hardened.
-- **Sybil resistance is an open problem, not yet solved.** A cooldown period before a freshly created wallet counts toward payout eligibility is the planned mitigation.
+- **CRE is demonstrated via simulation (`cre workflow simulate`), not a live deployment.** Confidential-workflow deploy access is gated beta and I didn't get access. Simulation is explicitly an accepted, valid way to satisfy the track's requirements — but it is not yet running on Chainlink's live DON.
+- Here is a terminal output example of it though: 
+<img width="200" height="148" alt="Image" src="https://github.com/user-attachments/assets/3721d768-ab32-463f-b239-0455658aada9" />
 
-## License
+- **Sybil resistance is an open problem, not yet solved.** A cooldown period before a freshly created wallet counts toward payout eligibility is the planned mitigation for this mvp.
 
-This project is licensed under the MIT License.
-
-## Credits
-
-Built by @N44TS for ETHGlobal.
-
-## FAQs
-
-**Why can a contributor claim more than once?**
-"Claim once" means once per buyer-funded release, not once ever. If five different buyers purchase reports that include your contribution window, you can receive five separate rewards.
-
-**Does Chainlink CRE do anything beyond aggregating the cycle data?**
-Today: it fetches encrypted contributions, decrypts them inside `handlerInTee`, validates and aggregates them, and enforces the k-anonymity threshold — the same core confidential job throughout. It does not yet generate the reward Merkle root itself; that's the next planned step (see Honest limitations).
-
-**Is this more anonymous than a normal payout, in the strict cryptographic sense?**
-Not yet, fully. Claiming makes a reward wallet's association with a payout window publicly visible on-chain — the same as any direct payout would be. What Merkle proofs *do* provide today: no full recipient list stored on-chain, cryptographic proof of eligibility, and enforced one-claim-per-release. A separate, dedicated reward wallet (not reused elsewhere) is what actually protects a contributor's identity.
-
-**Why use a smart contract instead of just paying people directly?**
-Because it makes the payout trust-minimized. Once the contract holds the funds, our own server can no longer decide, redirect, or skip a payout — it can only ever pay a wallet that proves it's on the sealed list, and only once.
 
 ## Conclusion
 
-Nugget is an attempt to build the Web3 version of "your data, your choice, your cut" for women's health — genuinely private by architecture, not by policy promise, with real money changing hands in a way no single party (including us) fully controls. It's not finished — the honest limitations above are real and stated on purpose — but the core loop, from an anonymous cycle log to a Chainlink-verified payout, works end to end today.
+Nugget is an attempt to build the Web3 version of "your data, your choice, your cut" for women's health — genuinely private by architecture, not by policy promise, with real money changing hands in a way no single party fully controls. The core loop, from an anonymous cycle log to a Chainlink-verified payout, works end to end today. Nobody — not me, not a hacker, not even Chainlink — ever needs to see a list connecting a real person to their health data to make the payment happen. The blockchain only ever sees one sealed envelope, and individual stubs being redeemed against it.
 
-## In-depth: how payment and Merkle claiming actually works
+## How it works chart
+<img width="250" height="160" alt="Image" src="https://github.com/user-attachments/assets/8b34d46b-d805-4535-8cc6-2489bd67dc5a" />
 
-Imagine a locked tip jar and a raffle.
-
-**The tip jar**: a buyer pays into the escrow contract. Think of it as a tip jar that only opens under specific rules — not something anyone, including us, can just dip into.
-
-**The raffle seal**: Chainlink CRE looks at all the anonymous contributors in a payout window and decides who qualifies for a share — without ever revealing who they are. That decision gets compressed into a single scrambled fingerprint, a Merkle root, and only *that* fingerprint goes on-chain. It's like a wax seal on an envelope containing 50 raffle tickets: the seal proves the list is official and unforgeable, without saying who holds which ticket.
-
-**The ticket stub**: each eligible contributor gets their own personal proof — a tiny piece of data that says "I'm one of the 50 on that sealed list," without revealing anyone else's. When they want their reward, they submit their stub to the contract. The contract checks it against the seal; if it matches, money comes out automatically, straight to their wallet. Try to reuse the same stub twice, and the contract remembers and blocks it.
-
-Nobody — not me, not a hacker, not even Chainlink — ever needs to see a list connecting a real person to their health data to make the payment happen. The blockchain only ever sees one sealed envelope, and individual stubs being redeemed against it. That's what makes the payout trustworthy *and* private at the same time — normally you have to pick one or the other.
 
 ## Demo testing notes
 
