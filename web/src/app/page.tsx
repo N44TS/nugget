@@ -20,7 +20,7 @@ export default function Home() {
       priority 
     />
     </h1>
-            <p className="tagline">CHANGE THIS Track your cycle private and get rewarded for it — with an optional way to contribute anonymous insights to research.</p>
+            <p className="tagline">Track your cycle privately, and get rewarded for it when you contribute your anonymous insights to research.</p>
           </div>
           <aside className="privacy-promise" aria-label="Privacy promise">
             <span aria-hidden="true">🔒</span>
