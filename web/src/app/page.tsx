@@ -20,7 +20,7 @@ export default function Home() {
       priority 
     />
     </h1>
-            <p className="tagline">A private place to track your cycle — with an optional way to contribute anonymous insights to research.</p>
+            <p className="tagline">CHANGE THIS Track your cycle private and get rewarded for it — with an optional way to contribute anonymous insights to research.</p>
           </div>
           <aside className="privacy-promise" aria-label="Privacy promise">
             <span aria-hidden="true">🔒</span>
@@ -28,9 +28,9 @@ export default function Home() {
           </aside>
         </header>
         <nav className="journey" aria-label="Your Nugget journey">
-          <span><b>1</b> Log privately</span>
-          <span><b>2</b> Contribute to research</span>
-          <span><b>3</b> Get rewarded</span>
+          <span><b>1.</b> Log privately</span>
+          <span><b>2.</b> Contribute to research</span>
+          <span><b>3.</b> Get rewarded</span>
         </nav>
         <TrackerApp showRewards={Boolean(privyAppId)} />
         <p className="foot">
